@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EyeTalk - AI视觉对话助手</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 顶部标题栏 -->
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">👁️</span>
+        <h1>EyeTalk <span class="subtitle">AI视觉对话助手</span></h1>
+      </div>
+      <div class="header-right">
+        <span class="ws-status" id="wsStatus">⚫ 未连接</span>
+        <button class="btn btn-glow btn-reconnect" id="btnReconnect" title="重新连接">🔄 重连</button>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="main">
+      <!-- 左侧：视频预览区 -->
+      <section class="panel video-panel">
+        <div class="panel-header">
+          <span>📷 摄像头</span>
+          <span class="camera-state" id="cameraState">未开启</span>
+        </div>
+        <div class="video-container">
+          <video id="videoEl" autoplay muted playsinline></video>
+          <canvas id="canvasEl"></canvas>
+          <div class="video-placeholder" id="videoPlaceholder">
+            <div class="placeholder-icon">📷</div>
+            <p>点击下方按钮开启摄像头</p>
+          </div>
+          <!-- LIVE 指示灯 -->
+          <div class="live-badge" id="liveBadge">
+            <span class="live-dot"></span> LIVE
+          </div>
+          <!-- 自动观察状态覆盖层 -->
+          <div class="auto-status" id="autoStatus">
+            <span class="auto-status-dot"></span>
+            <span class="auto-status-text">采样中</span>
+          </div>
+        </div>
+        <div class="video-controls">
+          <button class="btn btn-glow btn-green" id="btnStartCam">▶ 开始摄像头</button>
+          <button class="btn btn-glow btn-red" id="btnStopCam" disabled>⏹ 停止</button>
+        </div>
+        <!-- 自动观察模式开关 -->
+        <div class="auto-toggle-bar">
+          <label class="toggle-label">
+            <span class="toggle-text">🔍 自动观察模式</span>
+            <input type="checkbox" id="toggleAutoMode" class="toggle-input" />
+            <span class="toggle-switch"></span>
+          </label>
+          <span class="auto-hint" id="autoHint">AI将持续观察画面变化</span>
+        </div>
+      </section>
+
+      <!-- 右侧：对话消息区 -->
+      <section class="panel chat-panel">
+        <div class="panel-header">
+          <span>💬 对话</span>
+          <button class="btn btn-ghost btn-sm" id="btnClear">清空</button>
+        </div>
+        <div class="messages" id="messages">
+          <div class="msg msg-system">
+            <div class="bubble bubble-system">
+              欢迎使用 EyeTalk！开启摄像头后，发送消息时会自动截取画面一并发送给 AI 分析。
+            </div>
+          </div>
+        </div>
+
+        <!-- 语音识别实时文字 -->
+        <div class="interim-bar" id="interimBar">
+          <span class="interim-dot"></span>
+          <span class="interim-text" id="interimText"></span>
+        </div>
+
+        <!-- 快捷指令按钮 -->
+        <div class="quick-actions" id="quickActions">
+          <button class="chip" data-cmd="ocr">📷 OCR识别</button>
+          <button class="chip" data-cmd="translate">🌐 翻译</button>
+          <button class="chip" data-cmd="objects">🔍 识别物体</button>
+          <button class="chip" data-cmd="scene">📝 描述场景</button>
+          <button class="chip" data-cmd="screenshot">💾 截图</button>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="input-bar">
+          <button class="btn btn-voice" id="btnVoice">
+            <span class="voice-icon">🎤</span>
+            <span class="voice-label">按住说话</span>
+            <span class="voice-pulse" id="voicePulse"></span>
+          </button>
+          <input type="text" id="textInput" placeholder="输入文字消息..." autocomplete="off" />
+          <button class="btn btn-glow btn-blue" id="btnSend">发送</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- 底部费用统计栏 -->
+    <footer class="stats-bar" id="statsBar">
+      <span class="stat-item">📞 API调用: <strong id="statCalls">0</strong></span>
+      <span class="stat-divider">|</span>
+      <span class="stat-item">📊 Token: <strong id="statTokens">0</strong></span>
+      <span class="stat-divider">|</span>
+      <span class="stat-item">💰 费用: ¥<strong id="statCost">0.000</strong></span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
