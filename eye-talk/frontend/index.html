@@ -96,6 +96,7 @@
         <!-- 输入区 -->
         <div class="input-bar">
           <button class="btn btn-voice" id="btnVoice">
+            <canvas class="voice-wave-canvas" id="voiceWaveCanvas"></canvas>
             <span class="voice-icon">🎤</span>
             <span class="voice-label">按住说话</span>
             <span class="voice-pulse" id="voicePulse"></span>
@@ -152,6 +153,41 @@
       </div>
 
       <div id="configStatus"></div>
+
+      <hr class="modal-divider" />
+      <h3>🔊 语音音色设置</h3>
+      <label>选择音色</label>
+      <div class="voice-pack-grid" id="voicePackGrid">
+        <button class="voice-pack-btn active" data-voice="doubao">
+          <span class="vp-icon">🎙️</span>
+          <span class="vp-name">晓晓</span>
+          <span class="vp-desc">女声 · 温润自然</span>
+        </button>
+        <button class="voice-pack-btn" data-voice="warm">
+          <span class="vp-icon">🌸</span>
+          <span class="vp-name">晓伊</span>
+          <span class="vp-desc">女声 · 柔和亲切</span>
+        </button>
+        <button class="voice-pack-btn" data-voice="news">
+          <span class="vp-icon">📺</span>
+          <span class="vp-name">云扬</span>
+          <span class="vp-desc">男声 · 新闻播报</span>
+        </button>
+        <button class="voice-pack-btn" data-voice="cute">
+          <span class="vp-icon">🎀</span>
+          <span class="vp-name">云夏</span>
+          <span class="vp-desc">男声 · 活泼俏皮</span>
+        </button>
+        <button class="voice-pack-btn" data-voice="serious">
+          <span class="vp-icon">🎩</span>
+          <span class="vp-name">云健</span>
+          <span class="vp-desc">男声 · 沉稳有力</span>
+        </button>
+      </div>
+      <div class="test-voice-row">
+        <button type="button" id="testVoiceBtn" class="test-voice-btn">🔊 试听当前音色</button>
+      </div>
+
       <div class="modal-actions">
         <button id="saveConfigBtn">保存</button>
         <button id="cancelConfigBtn">取消</button>
