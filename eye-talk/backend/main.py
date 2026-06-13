@@ -179,4 +179,15 @@ app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="fro
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    HOST = "0.0.0.0"
+    PORT = 8000
+
+    print("=" * 50)
+    print("  👁️  EyeTalk AI视觉对话助手")
+    print("=" * 50)
+    print(f"  后端API地址  → http://localhost:{PORT}")
+    print(f"  前端页面地址 → http://localhost:{PORT}/")
+    print(f"  API文档地址  → http://localhost:{PORT}/docs")
+    print("=" * 50)
+
+    uvicorn.run("main:app", host=HOST, port=PORT, reload=True)
