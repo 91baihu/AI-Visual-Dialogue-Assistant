@@ -919,6 +919,11 @@ body {
   font-weight: 600;
 }
 
+.stats-bar .icon-xs {
+  color: var(--mi-text-sub);
+  opacity: 0.8;
+}
+
 .stats-bar.warn {
   border-color: var(--mi-error);
   box-shadow: 0 0 12px rgba(255, 68, 68, 0.15);
