@@ -52,8 +52,6 @@ let ws = null;
 let cameraStream = null;
 let recognition = null;
 let isRecording = false;
-let mediaRecorder = null;    // MediaRecorder 实例
-let audioChunks = [];        // 录音数据块
 let selectedVoice = null;    // 当前选中的 TTS 音色
 let aiTimeoutTimer = null;
 let reconnectTimer = null;
@@ -501,115 +499,63 @@ async function fetchStats() {
 setInterval(fetchStats, 5000);
 fetchStats();
 
-// ==================== Speech Recognition (MediaRecorder + 后端 STT) ====================
+// ==================== Speech Recognition (Web Speech API) ====================
 function initSpeechRecognition() {
-  // 检查浏览器是否支持 MediaRecorder
-  if (!window.MediaRecorder) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
     btnVoice.classList.add("unsupported");
     btnVoice.querySelector(".voice-label").textContent = "浏览器不支持";
-    btnVoice.addEventListener("click", () => addMessage("system", "🎤 当前浏览器不支持录音，请使用 Chrome 或 Edge 浏览器"));
+    btnVoice.addEventListener("click", () => addMessage("system", "🎤 请使用 Chrome 或 Edge 浏览器"));
+    return;
   }
+  recognition = new SR();
+  recognition.lang = "zh-CN";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+
+  // 实时显示识别结果
+  recognition.onresult = (e) => {
+    let finalText = "", interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += t;
+      else interim += t;
+    }
+    if (finalText) textInput.value = (textInput.value + finalText).trim();
+    if (interim) {
+      interimBar.classList.add("active");
+      interimText.textContent = interim;
+    } else {
+      interimBar.classList.remove("active");
+    }
+  };
+
+  // 错误不停录，只记日志
+  recognition.onerror = (e) => {
+    console.log("[SR] error:", e.error);
+    if (e.error === "not-allowed") {
+      addMessage("system", "🎤 麦克风权限被拒绝");
+      btnVoice.classList.add("unsupported");
+      stopRecording();
+    }
+  };
+
+  // 自动重启（除非用户已停止）
+  recognition.onend = () => {
+    if (isRecording) {
+      try { recognition.start(); } catch {}
+    }
+  };
 }
 
-async function startRecording() {
-  if (isRecording) return;
-
-  // 打断当前 TTS 播放
-  stopCurrentAudio();
-
+function startRecording() {
+  if (!recognition || isRecording) return;
+  stopCurrentAudio(); // 打断 TTS
   isRecording = true;
-  audioChunks = [];
   btnVoice.classList.add("recording");
-  btnVoice.querySelector(".voice-label").textContent = "录音中…松开识别";
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-
-    // 同时启动声波可视化
-    micStream = stream;
-    initAudioVisualization();
-    if (audioContext && audioContext.state === "suspended") await audioContext.resume();
-    const source = audioContext.createMediaStreamSource(stream);
-    source.connect(analyser);
-    const btnRect = btnVoice.getBoundingClientRect();
-    voiceWaveCanvas.width = btnRect.width * window.devicePixelRatio;
-    voiceWaveCanvas.height = btnRect.height * window.devicePixelRatio;
-    waveCtx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
-    drawWaveLoop();
-
-    // 优先用 WAV（后端兼容性最好），降级 webm
-    let mimeType = "audio/webm;codecs=opus";
-    if (MediaRecorder.isTypeSupported("audio/wav")) {
-      mimeType = "audio/wav";
-    } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
-      mimeType = "audio/ogg;codecs=opus";
-    }
-    mediaRecorder = new MediaRecorder(stream, { mimeType });
-    console.log("[STT] Recording with mimeType:", mimeType);
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunks.push(e.data);
-    };
-
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      stopAudioVisualization();
-
-      if (audioChunks.length === 0) return;
-      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-      audioChunks = [];
-
-      if (audioBlob.size < 500) {
-        addMessage("system", "🎤 录音太短，请长按说话");
-        return;
-      }
-
-      // 显示识别中状态
-      interimBar.classList.add("active");
-      interimText.textContent = "正在识别…";
-
-      try {
-        const resp = await fetch("/api/stt", {
-          method: "POST",
-          headers: { "Content-Type": "audio/webm" },
-          body: audioBlob,
-        });
-        const result = await resp.json();
-
-        interimBar.classList.remove("active");
-        interimText.textContent = "";
-
-        if (result.success && result.text) {
-          textInput.value = result.text;
-          console.log("[STT] Recognized:", result.text);
-        } else {
-          const errMsg = result.error || "未能识别语音";
-          console.warn("[STT] Failed:", errMsg);
-          addMessage("system", "🎤 " + errMsg);
-        }
-      } catch (e) {
-        interimBar.classList.remove("active");
-        interimText.textContent = "";
-        console.warn("[STT] Request error:", e);
-        addMessage("system", "🎤 语音识别请求失败，请检查网络");
-      }
-    };
-
-    mediaRecorder.start(100); // 每 100ms 收集一次数据
-    console.log("[STT] Recording started");
-  } catch (e) {
-    console.warn("[STT] getUserMedia failed:", e);
-    isRecording = false;
-    btnVoice.classList.remove("recording");
-    btnVoice.querySelector(".voice-label").textContent = "按住说话";
-    stopAudioVisualization();
-    if (e.name === "NotAllowedError") {
-      addMessage("system", "🎤 麦克风权限被拒绝，请在浏览器地址栏允许");
-      btnVoice.classList.add("unsupported");
-    }
-  }
+  btnVoice.querySelector(".voice-label").textContent = "松开结束";
+  try { recognition.start(); } catch {}
 }
 
 function stopRecording() {
@@ -617,11 +563,8 @@ function stopRecording() {
   isRecording = false;
   btnVoice.classList.remove("recording");
   btnVoice.querySelector(".voice-label").textContent = "按住说话";
-
-  if (mediaRecorder && mediaRecorder.state === "recording") {
-    mediaRecorder.stop();
-  }
-  // 声波可视化在 mediaRecorder.onstop 中清理
+  interimBar.classList.remove("active");
+  if (recognition) try { recognition.stop(); } catch {}
 }
 
 // ==================== Audio Visualization ====================
@@ -777,8 +720,8 @@ function stopCurrentAudio() {
 }
 
 /**
- * 通过后端 /api/tts 获取真人语音并播放。
- * 使用流式接口减少等待时间，失败降级为浏览器语音。
+ * 通过后端流式 TTS 接口播放语音。
+ * 使用 MediaSource 实现边接收边播放，首包即响。
  */
 async function speakText(text, bubbleEl) {
   const clean = text.replace(/<[^>]*>/g, "").trim();
@@ -794,7 +737,7 @@ async function speakText(text, bubbleEl) {
     ttsAbortCtrl = new AbortController();
     currentIndicator = addSpeakingIndicator(bubbleEl);
 
-    const resp = await fetch("/api/tts", {
+    const resp = await fetch("/api/tts/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: clean, voice_id: voiceId }),
@@ -804,63 +747,117 @@ async function speakText(text, bubbleEl) {
     if (reqId !== ttsRequestId) return;
 
     if (!resp.ok) {
-      let detail = "TTS 请求失败";
-      try { detail = (await resp.json()).detail || detail; } catch {}
-      console.warn("[TTS] Error (" + resp.status + "):", detail);
       removeSpeakingIndicator(currentIndicator);
       currentIndicator = null;
       speakTextFallback(clean, bubbleEl);
       return;
     }
 
-    const audioBlob = await resp.blob();
-    const t1 = performance.now();
-    console.log("[TTS] Got audio:", audioBlob.size, "bytes in", Math.round(t1 - t0), "ms");
-
-    if (reqId !== ttsRequestId) return;
-
-    if (audioBlob.size === 0) {
-      removeSpeakingIndicator(currentIndicator);
-      currentIndicator = null;
-      speakTextFallback(clean, bubbleEl);
-      return;
+    // 尝试 MediaSource 流式播放
+    const played = await _streamPlay(resp, reqId, t0);
+    if (!played) {
+      // MSE 不支持，降级为 blob 播放
+      const blob = await resp.blob();
+      if (reqId === ttsRequestId && blob.size > 0) {
+        await _blobPlay(blob, reqId, t0);
+      } else {
+        speakTextFallback(clean, bubbleEl);
+      }
     }
-
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
-    currentAudio = audio;
-    currentAudioUrl = audioUrl;
-
-    audio.onplaying = () => {
-      console.log("[TTS] Playback started in", Math.round(performance.now() - t0), "ms total");
-    };
-    audio.onended = () => {
-      if (reqId !== ttsRequestId) return;
-      removeSpeakingIndicator(currentIndicator);
-      currentIndicator = null;
-      URL.revokeObjectURL(audioUrl);
-      currentAudioUrl = null;
-      currentAudio = null;
-    };
-    audio.onerror = () => {
-      if (reqId !== ttsRequestId) return;
-      removeSpeakingIndicator(currentIndicator);
-      currentIndicator = null;
-      URL.revokeObjectURL(audioUrl);
-      currentAudioUrl = null;
-      currentAudio = null;
-    };
-
-    await audio.play();
   } catch (e) {
     if (e.name === "AbortError") return;
-    console.warn("[TTS] Failed, falling back:", e);
+    console.warn("[TTS] Failed:", e);
     if (reqId === ttsRequestId) {
       removeSpeakingIndicator(currentIndicator);
       currentIndicator = null;
     }
     speakTextFallback(clean, bubbleEl);
   }
+}
+
+/** MediaSource 流式播放：边收边播 */
+async function _streamPlay(resp, reqId, t0) {
+  try {
+    if (!window.MediaSource) return false;
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const audio = new Audio();
+    audio.src = url;
+    currentAudio = audio;
+    currentAudioUrl = url;
+
+    return new Promise((resolve) => {
+      let sb = null;
+      const queue = [];
+      let readerDone = false;
+
+      ms.addEventListener("sourceopen", () => {
+        try {
+          sb = ms.addSourceBuffer("audio/mpeg");
+          sb.addEventListener("updateend", pump);
+
+          const reader = resp.body.getReader();
+          (async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) { readerDone = true; pump(); break; }
+                if (reqId !== ttsRequestId) { reader.cancel(); break; }
+                queue.push(value.buffer);
+                pump();
+              }
+            } catch {}
+          })();
+          resolve(true);
+        } catch { resolve(false); }
+      });
+
+      function pump() {
+        if (!sb || sb.updating || queue.length === 0) {
+          if (readerDone && queue.length === 0 && sb && !sb.updating) {
+            try { ms.endOfStream(); } catch {}
+          }
+          return;
+        }
+        try { sb.appendBuffer(queue.shift()); } catch {}
+      }
+
+      audio.onplaying = () => {
+        console.log("[TTS] Stream playback started in", Math.round(performance.now() - t0), "ms");
+      };
+      const cleanup = () => {
+        if (reqId !== ttsRequestId) return;
+        removeSpeakingIndicator(currentIndicator);
+        currentIndicator = null;
+        URL.revokeObjectURL(url);
+        currentAudioUrl = null;
+        currentAudio = null;
+      };
+      audio.onended = cleanup;
+      audio.onerror = () => { cleanup(); resolve(false); };
+      audio.play().catch(() => resolve(false));
+    });
+  } catch { return false; }
+}
+
+/** Blob 降级播放 */
+async function _blobPlay(blob, reqId, t0) {
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudio = audio;
+  currentAudioUrl = url;
+  audio.onplaying = () => console.log("[TTS] Blob play in", Math.round(performance.now() - t0), "ms");
+  const cleanup = () => {
+    if (reqId !== ttsRequestId) return;
+    removeSpeakingIndicator(currentIndicator);
+    currentIndicator = null;
+    URL.revokeObjectURL(url);
+    currentAudioUrl = null;
+    currentAudio = null;
+  };
+  audio.onended = cleanup;
+  audio.onerror = cleanup;
+  await audio.play();
 }
 
 /** 浏览器内置语音降级方案 */
