@@ -3,8 +3,10 @@ import json
 import time
 import logging
 from dotenv import load_dotenv
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from ai_service import ChatService
@@ -153,6 +155,11 @@ async def websocket_endpoint(websocket: WebSocket):
         merge_stats(chat_service.tokens)
         del chat_service
         logger.info(f"[WS:{conn_id}] ChatService cleaned up")
+
+
+# Mount frontend static files — must be AFTER all API routes
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 
 if __name__ == "__main__":
