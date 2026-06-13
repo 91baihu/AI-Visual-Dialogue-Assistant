@@ -9,11 +9,12 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from ai_service import ChatService, PROVIDER_CONFIG, get_api_key_env_name
+from tts_service import synthesize_speech, get_voice_list
 
 load_dotenv()
 
@@ -163,6 +164,55 @@ async def health_check():
 async def get_stats():
     with _global_stats_lock:
         return dict(_global_stats)
+
+
+# ==================== TTS Endpoints ====================
+
+@app.get("/api/tts/voices")
+async def tts_voices():
+    """Return available TTS voice list."""
+    return {"voices": get_voice_list()}
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice_id: str = "doubao"
+    speed_ratio: Optional[float] = 1.0
+    volume_ratio: Optional[float] = 1.0
+    pitch_ratio: Optional[float] = 1.0
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("文本不能为空")
+        if len(v) > 5000:
+            raise ValueError("文本长度不能超过 5000 字符")
+        return v
+
+    @field_validator("voice_id")
+    @classmethod
+    def validate_voice_id(cls, v):
+        from tts_service import TTS_VOICE_CONFIG
+        if v not in TTS_VOICE_CONFIG:
+            raise ValueError(f"未知音色: {v}，可选值: {', '.join(TTS_VOICE_CONFIG.keys())}")
+        return v
+
+
+@app.post("/api/tts")
+async def tts_synthesize(req: TTSRequest):
+    """Synthesize speech from text and return MP3 audio (Edge TTS, no API key needed)."""
+    audio = await synthesize_speech(
+        text=req.text,
+        voice_id=req.voice_id,
+        speed_ratio=req.speed_ratio or 1.0,
+        volume_ratio=req.volume_ratio or 1.0,
+        pitch_ratio=req.pitch_ratio or 1.0,
+    )
+    if not audio:
+        raise HTTPException(status_code=500, detail="语音合成失败")
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 @app.get("/api/config")

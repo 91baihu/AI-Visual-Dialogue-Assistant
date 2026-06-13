@@ -561,8 +561,30 @@ body {
   box-shadow: 0 0 16px rgba(233,69,96,0.3);
 }
 
-.voice-icon { font-size: 1.1rem; z-index: 1; }
-.voice-label { z-index: 1; font-size: 0.82rem; }
+.btn-voice.unsupported {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+
+.voice-icon { font-size: 1.1rem; z-index: 2; }
+.voice-label { z-index: 2; font-size: 0.82rem; }
+
+/* Sound wave canvas — fills the button background during recording */
+.voice-wave-canvas {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.btn-voice.recording .voice-wave-canvas {
+  display: block;
+}
 
 .voice-pulse {
   display: none;
@@ -642,6 +664,8 @@ body {
   padding: 24px;
   width: 90%;
   max-width: 420px;
+  max-height: 85vh;
+  overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   position: relative;
   animation: modalSlideUp 0.25s ease-out;
@@ -783,6 +807,80 @@ body {
   color: #e94560;
   border-color: #e94560;
   box-shadow: 0 0 10px rgba(233, 69, 96, 0.15);
+}
+
+/* ========== 语音音色选择 ========== */
+.modal-divider {
+  border: none;
+  border-top: 1px solid #0f3460;
+  margin: 18px 0;
+}
+
+.voice-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* Modal scrollbar */
+.modal-content::-webkit-scrollbar { width: 5px; }
+.modal-content::-webkit-scrollbar-track { background: transparent; }
+.modal-content::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
+.modal-content::-webkit-scrollbar-thumb:hover { background: #e94560; }
+
+.voice-pack-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  border: 1px solid #0f3460;
+  background: #0d1b2a;
+  color: #7a8ba8;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.voice-pack-btn:hover {
+  border-color: #3b82f6;
+  background: #16213e;
+}
+
+.voice-pack-btn.active {
+  border-color: #e94560;
+  background: rgba(233, 69, 96, 0.08);
+  color: #fff;
+}
+
+.vp-icon { font-size: 1.4rem; }
+.vp-name { font-size: 0.82rem; font-weight: 600; }
+.vp-desc { font-size: 0.7rem; color: #4a5568; }
+
+.voice-pack-btn.active .vp-desc { color: #e94560; }
+
+.test-voice-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.test-voice-btn {
+  padding: 8px 24px;
+  border-radius: 8px;
+  background: #0f3460;
+  color: #7a8ba8;
+  border: 1px solid #1a3a5c;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: all 0.2s;
+}
+
+.test-voice-btn:hover {
+  background: #16213e;
+  color: #fff;
+  border-color: #3b82f6;
 }
 
 /* ========== Scrollbar ========== */

@@ -29,6 +29,8 @@ const textInput        = document.getElementById("textInput");
 const btnSend          = document.getElementById("btnSend");
 const btnVoice         = document.getElementById("btnVoice");
 const voicePulse       = document.getElementById("voicePulse");
+const voiceWaveCanvas  = document.getElementById("voiceWaveCanvas");
+const waveCtx          = voiceWaveCanvas.getContext("2d");
 const interimBar       = document.getElementById("interimBar");
 const interimText      = document.getElementById("interimText");
 const wsStatusEl       = document.getElementById("wsStatus");
@@ -50,6 +52,8 @@ let ws = null;
 let cameraStream = null;
 let recognition = null;
 let isRecording = false;
+let voiceBuffer = "";        // 语音识别累积缓冲
+let selectedVoice = null;    // 当前选中的 TTS 音色
 let aiTimeoutTimer = null;
 let reconnectTimer = null;
 let shouldReconnect = true;
@@ -58,6 +62,14 @@ let autoSampleTimer = null;
 let prevFrameData = null;
 let isAutoSending = false;
 let lastAIReply = ""; // for screenshot feature
+
+// ==================== Audio Visualization ====================
+let audioContext = null;      // Web Audio API context
+let analyser = null;          // AnalyserNode for frequency data
+let micStream = null;         // MediaStream from microphone
+let waveAnimFrame = null;     // requestAnimationFrame ID
+const WAVE_BAR_COUNT = 32;    // number of bars in the waveform
+const WAVE_BAR_GAP = 2;       // gap between bars in px
 
 // ==================== Utils ====================
 function scrollToBottom() {
@@ -132,6 +144,7 @@ function removeThinking() {
 }
 
 function addSpeakingIndicator(bubbleEl) {
+  if (!bubbleEl) return null;
   const indicator = document.createElement("span");
   indicator.className = "speaking-indicator";
   indicator.innerHTML = `<span class="speaking-bar"></span><span class="speaking-bar"></span><span class="speaking-bar"></span><span class="speaking-bar"></span>`;
@@ -490,42 +503,159 @@ fetchStats();
 // ==================== Speech Recognition ====================
 function initSpeechRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR || !navigator.mediaDevices) {
-    btnVoice.style.display = "none";
+  if (!SR) {
+    btnVoice.classList.add("unsupported");
+    btnVoice.querySelector(".voice-label").textContent = "浏览器不支持";
+    btnVoice.title = "请使用 Chrome / Edge 等 Chromium 内核浏览器，并通过 localhost 或 HTTPS 访问";
+    btnVoice.addEventListener("click", () => addMessage("system", "🎤 当前浏览器不支持语音识别，请使用 Chrome 或 Edge 浏览器"));
     return;
   }
 
   recognition = new SR();
   recognition.lang = "zh-CN";
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
 
   recognition.onresult = (event) => {
-    let interim = "", final = "";
+    let interim = "", finalText = "";
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) final += t;
+      if (event.results[i].isFinal) finalText += t;
       else interim += t;
     }
-    if (interim) { interimBar.classList.add("active"); interimText.textContent = interim; }
-    if (final) { interimBar.classList.remove("active"); interimText.textContent = ""; sendMessage(final); }
+    // 累积所有 final 结果到缓冲区，保证整段语音完整
+    if (finalText) voiceBuffer += finalText;
+    // 实时写入输入框：缓冲区 + 当前 interim
+    textInput.value = voiceBuffer + interim;
+    if (interim) {
+      interimBar.classList.add("active");
+      interimText.textContent = interim;
+    } else {
+      interimBar.classList.remove("active");
+      interimText.textContent = "";
+    }
   };
 
   recognition.onerror = (event) => {
-    if (event.error === "not-allowed") { addMessage("system", "🎤 麦克风权限被拒绝"); btnVoice.style.display = "none"; }
-    else if (event.error !== "no-speech") console.warn("语音识别错误:", event.error);
+    if (event.error === "not-allowed") {
+      addMessage("system", "🎤 麦克风权限被拒绝");
+      btnVoice.classList.add("unsupported");
+      btnVoice.querySelector(".voice-label").textContent = "权限被拒";
+    } else if (event.error !== "no-speech" && event.error !== "aborted") {
+      console.warn("语音识别错误:", event.error);
+    }
     stopRecording();
   };
 
-  recognition.onend = () => stopRecording();
+  // 持续模式：识别结束后自动重启（除非用户已松手）
+  recognition.onend = () => {
+    if (isRecording) {
+      try { recognition.start(); } catch {}
+    }
+  };
+}
+
+// ==================== Audio Visualization ====================
+function initAudioVisualization() {
+  if (audioContext) return; // already initialized
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.75;
+  } catch (e) {
+    console.warn("[EyeTalk] AudioContext 初始化失败:", e);
+  }
+}
+
+async function startAudioVisualization() {
+  try {
+    initAudioVisualization();
+    if (!audioContext || !analyser) return;
+
+    // Resume context if suspended (required by some browsers)
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const source = audioContext.createMediaStreamSource(micStream);
+    source.connect(analyser);
+
+    // Size canvas to button dimensions (use offsetWidth/Height which work even when hidden)
+    const btnRect = btnVoice.getBoundingClientRect();
+    voiceWaveCanvas.width = btnRect.width * window.devicePixelRatio;
+    voiceWaveCanvas.height = btnRect.height * window.devicePixelRatio;
+    waveCtx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+
+    drawWaveLoop();
+  } catch (e) {
+    console.warn("[EyeTalk] 麦克风音频流获取失败:", e);
+  }
+}
+
+function drawWaveLoop() {
+  if (!isRecording || !analyser) return;
+
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  analyser.getByteFrequencyData(dataArray);
+
+  const w = voiceWaveCanvas.width / window.devicePixelRatio;
+  const h = voiceWaveCanvas.height / window.devicePixelRatio;
+  waveCtx.clearRect(0, 0, w, h);
+
+  const barWidth = (w - WAVE_BAR_GAP * (WAVE_BAR_COUNT - 1)) / WAVE_BAR_COUNT;
+  const step = Math.floor(bufferLength / WAVE_BAR_COUNT);
+
+  for (let i = 0; i < WAVE_BAR_COUNT; i++) {
+    // Average a slice of frequency bins for each bar
+    let sum = 0;
+    for (let j = 0; j < step; j++) {
+      sum += dataArray[i * step + j];
+    }
+    const avg = sum / step;
+    const barHeight = Math.max(2, (avg / 255) * h * 0.9);
+    const x = i * (barWidth + WAVE_BAR_GAP);
+    const y = (h - barHeight) / 2;
+
+    // Gradient from accent to highlight color
+    const gradient = waveCtx.createLinearGradient(x, y, x, y + barHeight);
+    gradient.addColorStop(0, "rgba(233, 69, 96, 0.9)");
+    gradient.addColorStop(1, "rgba(15, 52, 96, 0.6)");
+    waveCtx.fillStyle = gradient;
+    waveCtx.beginPath();
+    waveCtx.roundRect(x, y, barWidth, barHeight, 2);
+    waveCtx.fill();
+  }
+
+  waveAnimFrame = requestAnimationFrame(drawWaveLoop);
+}
+
+function stopAudioVisualization() {
+  if (waveAnimFrame) {
+    cancelAnimationFrame(waveAnimFrame);
+    waveAnimFrame = null;
+  }
+  if (micStream) {
+    micStream.getTracks().forEach((t) => t.stop());
+    micStream = null;
+  }
+  // Clear canvas and reset transform
+  if (voiceWaveCanvas) {
+    waveCtx.setTransform(1, 0, 0, 1, 0, 0);
+    waveCtx.clearRect(0, 0, voiceWaveCanvas.width, voiceWaveCanvas.height);
+  }
 }
 
 function startRecording() {
   if (!recognition || isRecording) return;
   isRecording = true;
+  voiceBuffer = "";  // 清空缓冲区，开始新一轮录音
   btnVoice.classList.add("recording");
   btnVoice.querySelector(".voice-label").textContent = "松开结束";
+  startAudioVisualization();  // 启动声波动画
   try { recognition.start(); } catch { stopRecording(); }
 }
 
@@ -536,7 +666,9 @@ function stopRecording() {
   btnVoice.querySelector(".voice-label").textContent = "按住说话";
   interimBar.classList.remove("active");
   interimText.textContent = "";
+  stopAudioVisualization();   // 停止声波动画，释放麦克风
   if (recognition) try { recognition.stop(); } catch {}
+  // 语音识别结果已实时写入 textInput，用户可按发送键
 }
 
 btnVoice.addEventListener("mousedown", (e) => { e.preventDefault(); startRecording(); });
@@ -546,19 +678,187 @@ btnVoice.addEventListener("touchstart",(e) => { e.preventDefault(); startRecordi
 btnVoice.addEventListener("touchend",  (e) => { e.preventDefault(); stopRecording();  });
 
 // ==================== TTS ====================
-function speakText(text, bubbleEl) {
-  if (!("speechSynthesis" in window)) return;
+// 音色包配置（Edge TTS 微软神经网络语音）
+const VOICE_PACKS = [
+  { id: "doubao",    name: "晓晓（默认）",  style: "女声 · 温润自然" },
+  { id: "warm",      name: "晓伊",          style: "女声 · 柔和亲切" },
+  { id: "news",      name: "云扬",          style: "男声 · 新闻播报" },
+  { id: "cute",      name: "云夏",          style: "男声 · 活泼俏皮" },
+  { id: "serious",   name: "云健",          style: "男声 · 沉稳有力" },
+];
+
+// TTS 播放状态管理
+let currentAudio = null;        // 当前 Audio 实例
+let currentAudioUrl = null;     // 当前 blob URL（需要手动释放）
+let currentIndicator = null;    // 当前说话指示器
+let ttsAbortCtrl = null;        // AbortController（取消上一次请求）
+let ttsRequestId = 0;           // 请求序号（防止过期请求覆盖）
+
+function initVoicePacks() {
+  const saved = localStorage.getItem("eyetalk_voice") || "doubao";
+  selectedVoice = VOICE_PACKS.find(v => v.id === saved) || VOICE_PACKS[0];
+}
+
+/** 停止当前所有音频播放 + 清理资源 */
+function stopCurrentAudio() {
+  // 取消进行中的 fetch 请求
+  if (ttsAbortCtrl) {
+    ttsAbortCtrl.abort();
+    ttsAbortCtrl = null;
+  }
+  // 停止当前音频
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  // 释放 blob URL
+  if (currentAudioUrl) {
+    URL.revokeObjectURL(currentAudioUrl);
+    currentAudioUrl = null;
+  }
+  // 移除指示器
+  if (currentIndicator) {
+    removeSpeakingIndicator(currentIndicator);
+    currentIndicator = null;
+  }
+}
+
+/**
+ * 通过后端 /api/tts 获取真人语音 MP3 并播放。
+ * 失败时自动降级为浏览器内置语音。
+ */
+async function speakText(text, bubbleEl) {
   const clean = text.replace(/<[^>]*>/g, "").trim();
   if (!clean) return;
-  const utter = new SpeechSynthesisUtterance(clean);
+
+  // 停止上一段音频 & 取消上一次请求
+  stopCurrentAudio();
+
+  const voiceId = selectedVoice?.id || "doubao";
+  const reqId = ++ttsRequestId;
+
+  try {
+    ttsAbortCtrl = new AbortController();
+    currentIndicator = addSpeakingIndicator(bubbleEl);
+
+    const resp = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: clean, voice_id: voiceId }),
+      signal: ttsAbortCtrl.signal,
+    });
+
+    // 如果已经被新请求取代，丢弃结果
+    if (reqId !== ttsRequestId) return;
+
+    if (!resp.ok) {
+      let detail = "TTS 请求失败";
+      try { detail = (await resp.json()).detail || detail; } catch {}
+      console.warn("[TTS] Backend error (" + resp.status + "):", detail);
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+      speakTextFallback(clean, bubbleEl);
+      return;
+    }
+
+    const audioBlob = await resp.blob();
+    if (reqId !== ttsRequestId) return; // 再次检查
+
+    if (audioBlob.size === 0) {
+      console.warn("[TTS] Empty audio, using fallback");
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+      speakTextFallback(clean, bubbleEl);
+      return;
+    }
+
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    currentAudio = audio;
+    currentAudioUrl = audioUrl;
+
+    audio.onended = () => {
+      if (reqId !== ttsRequestId) return;
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+      URL.revokeObjectURL(audioUrl);
+      currentAudioUrl = null;
+      currentAudio = null;
+    };
+
+    audio.onerror = (e) => {
+      console.warn("[TTS] Audio error:", e);
+      if (reqId !== ttsRequestId) return;
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+      URL.revokeObjectURL(audioUrl);
+      currentAudioUrl = null;
+      currentAudio = null;
+    };
+
+    await audio.play();
+    console.log("[TTS] Playing OK, voice=" + voiceId + ", size=" + audioBlob.size);
+  } catch (e) {
+    if (e.name === "AbortError") return; // 被新请求取消，正常
+    console.warn("[TTS] Failed, falling back:", e);
+    if (reqId === ttsRequestId) {
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+    }
+    speakTextFallback(clean, bubbleEl);
+  }
+}
+
+/** 浏览器内置语音降级方案 */
+function speakTextFallback(text, bubbleEl) {
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "zh-CN";
   utter.rate = 1.0;
-  let indicator = null;
-  utter.onstart = () => { indicator = addSpeakingIndicator(bubbleEl); };
-  utter.onend = () => removeSpeakingIndicator(indicator);
-  utter.onerror = () => removeSpeakingIndicator(indicator);
+  const voices = speechSynthesis.getVoices();
+  const match = voices.find(v => v.lang.startsWith("zh"));
+  if (match) utter.voice = match;
+  let ind = null;
+  utter.onstart = () => { ind = addSpeakingIndicator(bubbleEl); };
+  utter.onend = () => removeSpeakingIndicator(ind);
+  utter.onerror = () => removeSpeakingIndicator(ind);
   speechSynthesis.speak(utter);
 }
+
+initVoicePacks();
+
+// ==================== Voice Pack Selection ====================
+function initVoicePackUI() {
+  const grid = document.getElementById("voicePackGrid");
+  const testBtn = document.getElementById("testVoiceBtn");
+  if (!grid) return;
+
+  function highlightActive() {
+    grid.querySelectorAll(".voice-pack-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.voice === (selectedVoice?.id || "doubao"));
+    });
+  }
+  highlightActive();
+
+  grid.addEventListener("click", (e) => {
+    const btn = e.target.closest(".voice-pack-btn");
+    if (!btn) return;
+    const pack = VOICE_PACKS.find(v => v.id === btn.dataset.voice);
+    if (!pack) return;
+    selectedVoice = pack;
+    localStorage.setItem("eyetalk_voice", pack.id);
+    highlightActive();
+  });
+
+  if (testBtn) {
+    testBtn.addEventListener("click", () => {
+      speakText("你好，我是你的AI视觉助手，让我们开始对话吧。", null);
+    });
+  }
+}
+
+initVoicePackUI();
 
 // ==================== Debug ====================
 console.log("[EyeTalk] page location:", window.location.href);
