@@ -17,6 +17,7 @@
       <div class="header-right">
         <span class="ws-status" id="wsStatus">⚫ 未连接</span>
         <button class="btn btn-glow btn-reconnect" id="btnReconnect" title="重新连接">🔄 重连</button>
+        <button class="btn btn-ghost" id="settingsBtn" title="设置">⚙️ 设置</button>
       </div>
     </header>
 
@@ -110,6 +111,49 @@
       <span class="stat-divider">|</span>
       <span class="stat-item">💰 费用: ¥<strong id="statCost">0.000</strong></span>
     </footer>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" id="modalCloseBtn" title="关闭">&times;</button>
+      <h3>AI模型配置</h3>
+
+      <label>模型提供商 <span id="currentProviderTag" class="tag"></span></label>
+      <select id="providerSelect">
+        <option value="deepseek">DeepSeek</option>
+        <option value="qwen">通义千问</option>
+        <option value="zhipu">智谱GLM</option>
+        <option value="kimi">Kimi (Moonshot)</option>
+        <option value="openai">OpenAI</option>
+      </select>
+      <div class="provider-info" id="providerInfo">
+        <p data-provider="deepseek">DeepSeek-V3 — 国产高性价比大模型，支持视觉理解</p>
+        <p data-provider="qwen">通义千问 — 阿里云出品，多模态能力强</p>
+        <p data-provider="zhipu">智谱GLM — 清华系模型，中文理解优秀</p>
+        <p data-provider="kimi">Kimi (Moonshot) — 长文本处理见长，支持多模态</p>
+        <p data-provider="openai">OpenAI — GPT-4o 全球领先的多模态模型</p>
+      </div>
+      <div class="provider-links" id="providerLinks">
+        <a data-provider="deepseek" href="https://platform.deepseek.com" target="_blank">申请 DeepSeek API Key →</a>
+        <a data-provider="qwen" href="https://dashscope.console.aliyun.com/" target="_blank">申请通义千问 API Key →</a>
+        <a data-provider="zhipu" href="https://open.bigmodel.cn/" target="_blank">申请智谱 API Key →</a>
+        <a data-provider="kimi" href="https://platform.moonshot.cn/" target="_blank">申请 Kimi API Key →</a>
+        <a data-provider="openai" href="https://platform.openai.com/api-keys" target="_blank">申请 OpenAI API Key →</a>
+      </div>
+
+      <label>API密钥</label>
+      <div class="input-with-btn">
+        <input type="password" id="apiKeyInput" placeholder="请输入API密钥" />
+        <button type="button" id="toggleKeyBtn" class="btn-inline" title="显示/隐藏">👁️</button>
+      </div>
+
+      <div id="configStatus"></div>
+      <div class="modal-actions">
+        <button id="saveConfigBtn">保存</button>
+        <button id="cancelConfigBtn">取消</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
