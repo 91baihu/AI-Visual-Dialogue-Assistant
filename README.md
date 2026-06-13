@@ -62,39 +62,50 @@ DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 
 > API Key 从 [platform.deepseek.com](https://platform.deepseek.com) 获取
 
-### 第二步：安装后端依赖
+### 第二步：一键启动
 
+**Linux / Mac：**
 ```bash
-cd eye-talk/backend
-cd eye-talk/backend
+chmod +x start.sh
+./start.sh
 ```
 
-### 第三步：启动后端
+**Windows：**
+```cmd
+start.bat
+```
+
+脚本会自动检查 Python 环境、安装依赖、启动后端并打开浏览器。
+
+启动成功后浏览器自动访问 http://localhost:8000/
+
+### 手动启动
+
+如果一键脚本不可用，也可以手动操作：
 
 ```bash
 cd eye-talk/backend
+pip install -r requirements.txt
 python main.py
 ```
 
 看到以下输出表示启动成功：
 
 ```
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Application startup complete.
+==================================================
+  EyeTalk AI视觉对话助手
+==================================================
+  后端API地址  → http://localhost:8000
+  前端页面地址 → http://localhost:8000/
+  API文档地址  → http://localhost:8000/docs
+==================================================
 ```
 
-### 第四步：打开前端
+然后访问 http://localhost:8000/ 即可使用。
 
-用浏览器直接打开 `eye-talk/frontend/index.html`，或使用本地服务器：
+> 如果端口 8000 被占用，程序会自动切换到 8001 并提示。
 
-```bash
-cd eye-talk/frontend
-python -m http.server 3000
-```
-
-然后访问 http://localhost:3000
-
-### 第五步：开始使用
+### 第三步：开始使用
 
 1. 点击「▶ 开始摄像头」→ 允许摄像头权限
 2. 输入文字或按住「🎤 按住说话」发送消息
@@ -120,9 +131,12 @@ python -m http.server 3000
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/` | GET | 健康检查 |
-| `/ws` | WebSocket | 对话服务 |
+| `/` | GET | 重定向到前端页面 |
+| `/app/*` | GET | 前端静态文件（HTML/CSS/JS） |
+| `/api/health` | GET | 健康检查 |
 | `/api/stats` | GET | Token 用量和费用统计 |
+| `/ws` | WebSocket | 对话服务 |
+| `/docs` | GET | FastAPI 交互式 API 文档 |
 
 ### WebSocket 消息格式
 
