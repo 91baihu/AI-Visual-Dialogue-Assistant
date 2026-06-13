@@ -3,9 +3,11 @@ import sys
 import json
 import time
 import logging
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from typing import Optional
+from pydantic import BaseModel, field_validator
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +34,77 @@ app.add_middleware(
 )
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+ENV_PATH = Path(__file__).parent / ".env"
+print(f"[DEBUG] ENV_PATH = {ENV_PATH.resolve()}  exists={ENV_PATH.exists()}")
+
+# Provider name → env var name mapping
+PROVIDER_KEY_MAP = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "qwen":     "QWEN_API_KEY",
+    "zhipu":    "ZHIPU_API_KEY",
+    "kimi":     "KIMI_API_KEY",
+    "openai":   "OPENAI_API_KEY",
+}
+
+
+def get_key_env_name(provider: str) -> str:
+    """Map provider name to its API key env var name."""
+    return PROVIDER_KEY_MAP.get(provider.lower(), f"{provider.upper()}_API_KEY")
+
+
+PROVIDER_BASE_URL = {
+    "deepseek": "https://api.deepseek.com",
+    "qwen":     "https://dashscope.aliyuncs.com/compatible-mode",
+    "zhipu":    "https://open.bigmodel.cn/api/paas",
+    "kimi":     "https://api.moonshot.cn",
+    "openai":   "https://api.openai.com",
+}
+
+
+async def _test_api_key(provider: str, api_key: str) -> dict:
+    """Test if an API key is valid by sending a minimal request."""
+    import httpx
+    base_url = PROVIDER_BASE_URL.get(provider, "")
+    if not base_url:
+        return {"valid": False, "reason": f"未知提供商 {provider}，无法测试"}
+
+    url = f"{base_url}/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                return {"valid": True, "reason": ""}
+            elif resp.status_code == 401:
+                return {"valid": False, "reason": "API Key 无效（认证失败）"}
+            else:
+                return {"valid": False, "reason": f"API 返回状态码 {resp.status_code}"}
+    except httpx.ConnectTimeout:
+        return {"valid": False, "reason": "连接超时，请检查网络"}
+    except httpx.ConnectError:
+        return {"valid": False, "reason": "无法连接到 API 服务器"}
+    except Exception as e:
+        return {"valid": False, "reason": str(e)[:100]}
+
+
+class ConfigUpdate(BaseModel):
+    provider: str
+    api_key: str
+    test: Optional[bool] = False
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, v):
+        if v.lower() not in PROVIDER_KEY_MAP:
+            raise ValueError(f"不支持的提供商: {v}，可选值: {', '.join(PROVIDER_KEY_MAP.keys())}")
+        return v.lower()
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError("API Key 长度不能少于 10 个字符")
+        return v.strip()
 
 # Global token stats across all connections
 import threading
@@ -84,6 +157,42 @@ async def health_check():
 async def get_stats():
     with _global_stats_lock:
         return dict(_global_stats)
+
+
+@app.get("/api/config")
+async def get_config():
+    """Return current config and which providers have keys configured"""
+    configured = {}
+    for provider, env_name in PROVIDER_KEY_MAP.items():
+        val = os.getenv(env_name, "")
+        configured[provider] = bool(val and val != "your_key_here")
+    return {
+        "provider": os.getenv("AI_PROVIDER", "deepseek"),
+        "configured": configured,
+    }
+
+
+@app.post("/api/config")
+async def update_config(config: ConfigUpdate):
+    """Save provider and API key to .env file, optionally test the key"""
+    try:
+        # Optional: test API key validity
+        if config.test:
+            test_result = await _test_api_key(config.provider, config.api_key)
+            if not test_result["valid"]:
+                return {"success": False, "message": f"密钥验证失败: {test_result['reason']}"}
+
+        env_name = get_key_env_name(config.provider)
+        logger.info(f"Saving config: provider={config.provider}, key_env={env_name}, path={ENV_PATH}")
+
+        set_key(str(ENV_PATH), "AI_PROVIDER", config.provider)
+        set_key(str(ENV_PATH), env_name, config.api_key)
+        os.environ["AI_PROVIDER"] = config.provider
+        os.environ[env_name] = config.api_key
+        return {"success": True, "message": "配置已保存"}
+    except Exception as e:
+        logger.error(f"Failed to save config: {e}")
+        return {"success": False, "message": f"保存失败: {str(e)}"}
 
 
 @app.websocket("/ws")
