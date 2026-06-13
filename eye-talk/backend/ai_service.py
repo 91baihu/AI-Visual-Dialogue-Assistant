@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 from typing import Optional
@@ -9,8 +10,88 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "你是一个AI视觉助手，用户会通过摄像头向你展示事物，"
     "你需要仔细观察图片内容并回答用户的问题。回答要简洁、准确、友好。"
-    "如果图片中有文字请帮忙识别。"
+    "如果图片中有文字请帮忙识别。\n\n"
+    "【输出格式要求 - 必须严格遵守】\n"
+    "1. 只输出纯文字，绝对禁止使用任何Markdown标记（如**加粗**、#标题、-列表、```代码块```等）\n"
+    "2. 绝对禁止使用emoji表情符号（如😊👍🔥❤️😂等一切emoji），绝对禁止使用HTML标签\n"
+    "3. 绝对禁止使用特殊装饰符号（如★●►▶◆◇■□▲△•·※→←↑↓等）\n"
+    "4. 禁止使用编号列表和项目符号，用自然语句表达\n"
+    "5. 简短问题回答控制在50字以内，场景描述控制在100字以内\n"
+    "6. 语气口语化，适合语音朗读\n"
+    "7. 违反以上任何一条都是错误的，你的回复必须是普通人打出来的纯文字"
 )
+
+# 正则：剥离 AI 回复中的 emoji 表情符号
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F1E0-\U0001F1FF"  # flags
+    "\U00002702-\U000027B0"  # dingbats
+    "\U0001F900-\U0001F9FF"  # supplemental symbols
+    "\U0001FA00-\U0001FA6F"  # chess symbols
+    "\U0001FA70-\U0001FAFF"  # symbols extended
+    "\U00002600-\U000026FF"  # misc symbols
+    "\U0000FE00-\U0000FE0F"  # variation selectors
+    "\U0000200D"             # zero width joiner
+    "\U00002B50\U00002B55"   # stars
+    "\U0000231A-\U0000231B"  # watch, hourglass
+    "\U00002328"             # keyboard
+    "\U000023CF"             # eject
+    "\U000023E9-\U000023F3"  # various symbols
+    "\U000023F8-\U000023FA"  # various symbols
+    "\U000025AA-\U000025AB"  # squares
+    "\U000025B6\U000025C0"   # play/reverse
+    "\U000025FB-\U000025FE"  # squares
+    "\U00002614-\U00002615"  # umbrella, coffee
+    "\U00002648-\U00002653"  # zodiac
+    "\U0000267F"             # wheelchair
+    "\U00002693"             # anchor
+    "\U000026A1"             # lightning
+    "\U000026AA-\U000026AB"  # circles
+    "\U000026BD-\U000026BE"  # soccer, baseball
+    "\U000026C4-\U000026C5"  # snowman, sun
+    "\U000026CE\U000026D4"   # ophiuchus, no entry
+    "\U000026EA"             # church
+    "\U000026F2-\U000026F3"  # fountain, golf
+    "\U000026F5"             # sailboat
+    "\U000026FA\U000026FD"   # tent, fuel pump
+    "\U00002702\U00002705"   # scissors, check
+    "\U00002708-\U0000270D"  # various
+    "\U0000270F\U00002712"   # pencil, nib
+    "\U00002714\U00002716"   # check, multiplication
+    "\U0000271D\U00002721"   # cross, star of david
+    "\U00002728"             # sparkles
+    "\U00002733-\U00002734"  # asterisk
+    "\U00002744\U00002747"   # snowflake, sparkle
+    "\U0000274C\U0000274E"   # cross marks
+    "\U00002753-\U00002755"  # question marks
+    "\U00002757"             # exclamation
+    "\U00002763-\U00002764"  # hearts
+    "\U00002795-\U00002797"  # plus, minus, divide
+    "\U000027A1"             # arrow
+    "\U000027B0\U000027BF"   # loops
+    "\U00002934-\U00002935"  # arrows
+    "\U00002B05-\U00002B07"  # arrows
+    "\U00002B1B-\U00002B1C"  # squares
+    "\U00003030\U0000303D"   # wavy dash, part alternation
+    "\U00003297\U00003299"   # circled ideographs
+    "]+",
+    flags=re.UNICODE,
+)
+
+# 常见装饰符号（非 emoji 但 AI 常用的）
+_DECORATIVE_PATTERN = re.compile(r'[★●►▶◆◇■□▲△•·※✨❗✅❌⚡❤️➡️⬅️⬆️⬇️]')
+
+
+def _clean_reply(text: str) -> str:
+    """剥离 AI 回复中的 emoji、装饰符号和多余空白。"""
+    text = _EMOJI_PATTERN.sub('', text)
+    text = _DECORATIVE_PATTERN.sub('', text)
+    text = re.sub(r'  +', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 MAX_HISTORY = 20
 
@@ -191,6 +272,7 @@ class ChatService:
         try:
             resp = self._call_api(self.chat_model, self.messages)
             reply = resp.choices[0].message.content
+            reply = _clean_reply(reply)
             self._track_usage(resp)
             elapsed = time.time() - start
             logger.info(f"[chat] text={text[:50]}... -> {len(reply)} chars, {elapsed:.2f}s")
@@ -226,6 +308,7 @@ class ChatService:
         try:
             resp = self._call_api(self.vision_model, self.messages)
             reply = resp.choices[0].message.content
+            reply = _clean_reply(reply)
             self._track_usage(resp)
             elapsed = time.time() - start
             logger.info(f"[chat_with_image] OK {elapsed:.2f}s -> {len(reply)} chars")
@@ -278,6 +361,7 @@ class ChatService:
         try:
             resp = self._call_api(self.chat_model, self.messages)
             reply = resp.choices[0].message.content
+            reply = _clean_reply(reply)
             self._track_usage(resp)
             elapsed = time.time() - start
             logger.info(f"[chat_image_fallback] {elapsed:.2f}s -> {len(reply)} chars")
