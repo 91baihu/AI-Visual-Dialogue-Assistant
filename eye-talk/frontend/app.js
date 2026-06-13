@@ -528,7 +528,7 @@ let sttFallbackMode = false;     // 是否使用 Web Speech API 降级模式
 let sttTimeoutTimer = null;      // 超时计时器
 
 const STT_WS_URL = "ws://localhost:8000/ws/stt";
-const STT_TIMEOUT = 15000;       // 15秒无结果超时
+const STT_TIMEOUT = 30000;       // 30秒无结果超时
 const STT_PCM_BUFFER_SIZE = 4096; // ScriptProcessor buffer size
 const STT_SAMPLE_RATE = 16000;   // 目标采样率
 
