@@ -15,6 +15,8 @@ import uvicorn
 
 from ai_service import ChatService, PROVIDER_CONFIG, get_api_key_env_name
 from tts_service import synthesize_speech, synthesize_speech_stream, get_voice_list
+import re
+import base64
 from stt_service import transcribe_audio
 
 load_dotenv()
@@ -361,6 +363,72 @@ async def update_config(config: ConfigUpdate):
     }
 
 
+def _split_sentences(text: str) -> list:
+    """将文本按中文标点和英文标点分句。"""
+    text = re.sub(r'<[^>]*>', '', text).strip()
+    if not text:
+        return []
+    # 按中英文句号、问号、感叹号、换行分句
+    parts = re.split(r'(?<=[。！？\.\!\?\n])', text)
+    # 合并过短的片段到前一句
+    sentences = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        if sentences and len(sentences[-1]) < 15:
+            sentences[-1] += p
+        else:
+            sentences.append(p)
+    # 如果只有一句且很长，按逗号再拆
+    if len(sentences) == 1 and len(sentences[0]) > 80:
+        long = sentences[0]
+        sentences = []
+        for seg in re.split(r'(?<=[，,;；])', long):
+            seg = seg.strip()
+            if seg:
+                sentences.append(seg)
+    return sentences[:10]  # 最多 10 句，避免过多请求
+
+
+async def _send_tts_chunks(ws, conn_id: int, text: str, voice_id: str):
+    """分句并行合成语音，按顺序通过 WebSocket 推送音频块。"""
+    sentences = _split_sentences(text)
+    if not sentences:
+        return
+
+    logger.info(f"[WS:{conn_id}] TTS: {len(sentences)} sentences, voice={voice_id}")
+    t0 = time.time()
+
+    # 并行合成所有句子
+    tasks = [
+        synthesize_speech(s, voice_id=voice_id)
+        for s in sentences
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 按顺序推送音频块
+    for i, (sentence, audio) in enumerate(zip(sentences, results)):
+        if isinstance(audio, Exception):
+            logger.warning(f"[WS:{conn_id}] TTS chunk {i} failed: {audio}")
+            continue
+        if not audio:
+            continue
+        try:
+            await ws.send_text(json.dumps({
+                "type": "audio",
+                "index": i,
+                "total": len(sentences),
+                "text": sentence[:50],
+                "data": base64.b64encode(audio).decode("ascii"),
+            }))
+        except Exception:
+            break
+
+    elapsed = time.time() - t0
+    logger.info(f"[WS:{conn_id}] TTS done: {len(sentences)} chunks in {elapsed:.2f}s")
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -384,6 +452,7 @@ async def websocket_endpoint(websocket: WebSocket):
             msg_type = data.get("type", "chat")
             text = data.get("text", "")
             image = data.get("image", "")
+            voice_id = data.get("voice_id", "doubao")
 
             if msg_type == "chat":
                 has_image = bool(image)
@@ -407,6 +476,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         "text": reply,
                         "usage": ai_service.tokens.to_dict(),
                     }))
+
+                    # 立即分句并行合成语音，逐块推送
+                    asyncio.create_task(
+                        _send_tts_chunks(websocket, conn_id, reply, voice_id)
+                    )
 
                 except Exception as e:
                     elapsed = time.time() - start

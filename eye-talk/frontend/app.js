@@ -314,25 +314,28 @@ function connectWS() {
   };
 
   ws.onmessage = (event) => {
-    removeThinking();
     isAutoSending = false;
     try {
       const data = JSON.parse(event.data);
+
       if (data.type === "reply") {
+        removeThinking();
         const wrapper = addMessage("ai", data.text);
         lastAIReply = data.text;
-        const bubble = wrapper.querySelector(".bubble-ai");
-        speakText(data.text, bubble);
         if (data.usage) updateStats(data.usage);
+        // 语音由后端通过 type=audio 推送，不在这里调用 speakText
+
+      } else if (data.type === "audio") {
+        // 后端推送的音频块，加入队列播放
+        _enqueueAudio(data);
+
       } else {
-        const wrapper = addMessage("ai", data.text || event.data);
-        const bubble = wrapper.querySelector(".bubble-ai");
-        speakText(data.text || event.data, bubble);
+        removeThinking();
+        addMessage("ai", data.text || event.data);
       }
     } catch {
-      const wrapper = addMessage("ai", event.data);
-      const bubble = wrapper.querySelector(".bubble-ai");
-      speakText(event.data, bubble);
+      removeThinking();
+      addMessage("ai", event.data);
     }
   };
 
@@ -368,7 +371,7 @@ function sendMessage(text, imageBase64) {
   const userLabel = imageBase64 ? `📸 ${text}` : text;
   addMessage("user", userLabel);
   showThinking();
-  const payload = { type: "chat", text: text.trim() };
+  const payload = { type: "chat", text: text.trim(), voice_id: selectedVoice?.id || "doubao" };
   if (imageBase64) payload.image = imageBase64;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
@@ -689,6 +692,8 @@ let currentAudioUrl = null;     // 当前 blob URL（需要手动释放）
 let currentIndicator = null;    // 当前说话指示器
 let ttsAbortCtrl = null;        // AbortController（取消上一次请求）
 let ttsRequestId = 0;           // 请求序号（防止过期请求覆盖）
+let audioQueue = [];            // 后端推送的音频块队列
+let isPlayingQueue = false;     // 是否正在播放队列
 
 function initVoicePacks() {
   const saved = localStorage.getItem("eyetalk_voice") || "doubao";
@@ -697,25 +702,76 @@ function initVoicePacks() {
 
 /** 停止当前所有音频播放 + 清理资源 */
 function stopCurrentAudio() {
-  // 取消进行中的 fetch 请求
   if (ttsAbortCtrl) {
     ttsAbortCtrl.abort();
     ttsAbortCtrl = null;
   }
-  // 停止当前音频
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
   }
-  // 释放 blob URL
   if (currentAudioUrl) {
     URL.revokeObjectURL(currentAudioUrl);
     currentAudioUrl = null;
   }
-  // 移除指示器
   if (currentIndicator) {
     removeSpeakingIndicator(currentIndicator);
     currentIndicator = null;
+  }
+  // 清空音频队列
+  audioQueue = [];
+  isPlayingQueue = false;
+}
+
+/** 将后端推送的音频块加入队列并触发播放 */
+function _enqueueAudio(chunk) {
+  const audioBytes = Uint8Array.from(atob(chunk.data), c => c.charCodeAt(0));
+  const blob = new Blob([audioBytes], { type: "audio/mpeg" });
+  const url = URL.createObjectURL(blob);
+  audioQueue.push({ url, index: chunk.index, total: chunk.total });
+
+  // 第一块到达时显示指示器并开始播放
+  if (!isPlayingQueue) {
+    isPlayingQueue = true;
+    currentIndicator = addSpeakingIndicator(null);
+    _playNextInQueue();
+  }
+}
+
+/** 按顺序播放队列中的音频块 */
+async function _playNextInQueue() {
+  if (audioQueue.length === 0) {
+    isPlayingQueue = false;
+    if (currentIndicator) {
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+    }
+    return;
+  }
+
+  const item = audioQueue.shift();
+  const audio = new Audio(item.url);
+  currentAudio = audio;
+  currentAudioUrl = item.url;
+
+  audio.onended = () => {
+    URL.revokeObjectURL(item.url);
+    currentAudio = null;
+    currentAudioUrl = null;
+    _playNextInQueue(); // 播放下一块
+  };
+
+  audio.onerror = () => {
+    URL.revokeObjectURL(item.url);
+    currentAudio = null;
+    currentAudioUrl = null;
+    _playNextInQueue();
+  };
+
+  try {
+    await audio.play();
+  } catch {
+    _playNextInQueue();
   }
 }
 
