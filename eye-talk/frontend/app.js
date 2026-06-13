@@ -560,6 +560,196 @@ function speakText(text, bubbleEl) {
   speechSynthesis.speak(utter);
 }
 
+// ==================== Debug ====================
+console.log("[EyeTalk] page location:", window.location.href);
+
+// ==================== Toast ====================
+function showToast(msg, type = "ok") {
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity 0.3s"; }, 2000);
+  setTimeout(() => el.remove(), 2300);
+}
+
+// ==================== Settings Modal ====================
+const settingsModal   = document.getElementById("settingsModal");
+const settingsBtn     = document.getElementById("settingsBtn");
+const modalCloseBtn   = document.getElementById("modalCloseBtn");
+const cancelConfigBtn = document.getElementById("cancelConfigBtn");
+const saveConfigBtn   = document.getElementById("saveConfigBtn");
+const providerSelect  = document.getElementById("providerSelect");
+const apiKeyInput     = document.getElementById("apiKeyInput");
+const configStatus    = document.getElementById("configStatus");
+const currentProviderTag = document.getElementById("currentProviderTag");
+const toggleKeyBtn    = document.getElementById("toggleKeyBtn");
+
+function openSettings() {
+  settingsModal.classList.remove("hidden");
+  loadConfig();
+}
+
+function closeSettings() {
+  settingsModal.classList.add("hidden");
+  configStatus.textContent = "";
+  configStatus.className = "";
+}
+
+settingsBtn.addEventListener("click", openSettings);
+modalCloseBtn.addEventListener("click", closeSettings);
+cancelConfigBtn.addEventListener("click", closeSettings);
+
+// Click overlay background to close
+settingsModal.addEventListener("click", (e) => {
+  if (e.target === settingsModal) closeSettings();
+});
+
+// Toggle password visibility
+toggleKeyBtn.addEventListener("click", () => {
+  const isPassword = apiKeyInput.type === "password";
+  apiKeyInput.type = isPassword ? "text" : "password";
+  toggleKeyBtn.textContent = isPassword ? "🙈" : "👁️";
+});
+
+async function loadConfig() {
+  const url = "/api/config";
+  console.log("[Config] GET", url);
+  try {
+    const resp = await fetch(url);
+    console.log("[Config] response status:", resp.status);
+    const data = await resp.json();
+
+    providerSelect.value = data.provider || localStorage.getItem("eyeTalk_provider") || "deepseek";
+
+    const configured = data.configured || {};
+    const current = providerSelect.value;
+    const hasKey = configured[current] || false;
+
+    currentProviderTag.textContent = hasKey ? "已配置" : "未配置";
+    currentProviderTag.className = "tag " + (hasKey ? "ok" : "no");
+
+    updateProviderInfo(current);
+  } catch (e) {
+    configStatus.textContent = "加载配置失败";
+    configStatus.className = "err";
+  }
+}
+
+function updateProviderInfo(provider) {
+  document.querySelectorAll("#providerInfo p").forEach((p) => {
+    p.style.display = p.dataset.provider === provider ? "block" : "none";
+  });
+  document.querySelectorAll("#providerLinks a").forEach((a) => {
+    a.style.display = a.dataset.provider === provider ? "inline-block" : "none";
+  });
+}
+
+providerSelect.addEventListener("change", (e) => {
+  const provider = e.target.value;
+  updateProviderInfo(provider);
+  currentProviderTag.textContent = "";
+  currentProviderTag.className = "tag";
+  apiKeyInput.value = "";
+  localStorage.setItem("eyeTalk_provider", provider);
+});
+
+async function saveConfig() {
+  const provider = providerSelect.value;
+  const apiKey = apiKeyInput.value.trim();
+
+  if (!apiKey) {
+    showToast("请输入 API 密钥", "err");
+    return;
+  }
+
+  saveConfigBtn.disabled = true;
+  saveConfigBtn.textContent = "保存中...";
+  configStatus.textContent = "";
+  configStatus.className = "";
+
+  const url = "/api/config";
+  const payload = { provider, api_key: apiKey };
+  console.log("[Config] POST", url, payload);
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    console.log("[Config] response status:", resp.status);
+
+    // Handle 422 validation errors
+    if (resp.status === 422) {
+      const errData = await resp.json();
+      const detail = errData.detail;
+      let msg = "参数验证失败";
+      if (Array.isArray(detail) && detail.length > 0) {
+        msg = detail.map((d) => d.msg).join("; ");
+      } else if (typeof detail === "string") {
+        msg = detail;
+      }
+      showSaveError(msg);
+      console.error("[Config] 422 validation error:", detail);
+      return;
+    }
+
+    const data = await resp.json();
+
+    if (data.success) {
+      configStatus.textContent = "✓ 配置已保存，正在测试连接...";
+      configStatus.className = "ok";
+      apiKeyInput.value = "";
+      localStorage.setItem("eyeTalk_provider", provider);
+
+      // Reconnect WebSocket to use new provider
+      if (ws) ws.close();
+      connectWS();
+
+      showToast("配置已保存，已切换到 " + provider, "ok");
+      setTimeout(closeSettings, 1200);
+    } else {
+      showSaveError(data.message || "保存失败");
+      console.error("[Config] server error:", data.message);
+    }
+  } catch (e) {
+    if (e.name === "AbortError") {
+      showSaveError("请求超时，请检查网络后重试");
+      console.error("[Config] request timeout");
+    } else if (e.message && e.message.includes("Failed to fetch")) {
+      showSaveError("无法连接到服务器，请确认后端已启动");
+      console.error("[Config] network error:", e);
+    } else {
+      showSaveError("请求失败: " + (e.message || "未知错误"));
+      console.error("[Config] unexpected error:", e);
+    }
+  } finally {
+    saveConfigBtn.disabled = false;
+    saveConfigBtn.textContent = "保存";
+  }
+}
+
+function showSaveError(msg) {
+  configStatus.innerHTML = msg + ' <a href="#" id="retryLink">重试</a>';
+  configStatus.className = "err";
+  document.getElementById("retryLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    saveConfig();
+  });
+}
+
+saveConfigBtn.addEventListener("click", saveConfig);
+
 // ==================== Init ====================
+// Restore last used provider from localStorage
+const savedProvider = localStorage.getItem("eyeTalk_provider");
+if (savedProvider && providerSelect) providerSelect.value = savedProvider;
+
 connectWS();
 initSpeechRecognition();
