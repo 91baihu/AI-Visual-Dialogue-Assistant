@@ -116,6 +116,7 @@
   <!-- 设置弹窗 -->
   <div id="settingsModal" class="modal hidden">
     <div class="modal-content">
+      <button class="modal-close" id="modalCloseBtn" title="关闭">&times;</button>
       <h3>AI模型配置</h3>
 
       <label>模型提供商 <span id="currentProviderTag" class="tag"></span></label>
@@ -142,7 +143,10 @@
       </div>
 
       <label>API密钥</label>
-      <input type="password" id="apiKeyInput" placeholder="请输入API密钥" />
+      <div class="input-with-btn">
+        <input type="password" id="apiKeyInput" placeholder="请输入API密钥" />
+        <button type="button" id="toggleKeyBtn" class="btn-inline" title="显示/隐藏">👁️</button>
+      </div>
 
       <div id="configStatus"></div>
       <div class="modal-actions">
