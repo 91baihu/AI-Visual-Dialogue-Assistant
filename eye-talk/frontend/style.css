@@ -911,17 +911,16 @@ body {
   border-radius: var(--mi-radius);
   border: 1px solid var(--mi-border);
   font-size: 0.72rem;
-  color: var(--mi-text-muted);
+  color: var(--mi-text-sub);
 }
 
 .stat-item strong {
-  color: var(--mi-text-sub);
+  color: var(--mi-text);
   font-weight: 600;
 }
 
 .stats-bar .icon-xs {
-  color: var(--mi-text-sub);
-  opacity: 0.8;
+  color: var(--mi-accent);
 }
 
 .stats-bar.warn {
