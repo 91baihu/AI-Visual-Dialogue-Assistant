@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -58,6 +59,12 @@ def merge_stats(token_usage):
 
 
 @app.get("/")
+async def root():
+    """Redirect to frontend app"""
+    return RedirectResponse(url="/app")
+
+
+@app.get("/api/health")
 async def health_check():
     return {
         "status": "ok",
@@ -157,9 +164,9 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info(f"[WS:{conn_id}] ChatService cleaned up")
 
 
-# Mount frontend static files — must be AFTER all API routes
+# Mount frontend static files under /app to avoid conflicting with API routes
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
-app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 
 if __name__ == "__main__":
