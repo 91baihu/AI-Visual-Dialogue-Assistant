@@ -538,20 +538,21 @@ function initSpeechRecognition() {
   };
 
   recognition.onerror = (event) => {
-    if (event.error === "not-allowed") {
-      addMessage("system", "🎤 麦克风权限被拒绝");
+    console.log("[SR] error:", event.error);
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      addMessage("system", "🎤 麦克风权限被拒绝，请在浏览器地址栏允许麦克风权限");
       btnVoice.classList.add("unsupported");
       btnVoice.querySelector(".voice-label").textContent = "权限被拒";
-    } else if (event.error !== "no-speech" && event.error !== "aborted") {
-      console.warn("语音识别错误:", event.error);
+      stopRecording();
     }
-    stopRecording();
+    // no-speech / aborted / network 等错误不停止录音，让 onend 自动重启
   };
 
   // 持续模式：识别结束后自动重启（除非用户已松手）
   recognition.onend = () => {
+    console.log("[SR] ended, isRecording=", isRecording);
     if (isRecording) {
-      try { recognition.start(); } catch {}
+      try { recognition.start(); } catch (e) { console.warn("[SR] restart failed:", e); }
     }
   };
 }
@@ -581,11 +582,9 @@ async function startAudioVisualization() {
 
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,       // 回声消除
-        noiseSuppression: true,       // 噪声抑制
-        autoGainControl: true,        // 自动增益
-        sampleRate: 16000,            // 16kHz 采样率（语音识别最佳）
-        channelCount: 1,              // 单声道
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
       },
     });
     const source = audioContext.createMediaStreamSource(micStream);
@@ -659,12 +658,19 @@ function stopAudioVisualization() {
 
 function startRecording() {
   if (!recognition || isRecording) return;
+  console.log("[SR] Starting recognition...");
   isRecording = true;
   voiceBuffer = "";  // 清空缓冲区，开始新一轮录音
   btnVoice.classList.add("recording");
   btnVoice.querySelector(".voice-label").textContent = "松开结束";
   startAudioVisualization();  // 启动声波动画
-  try { recognition.start(); } catch { stopRecording(); }
+  try {
+    recognition.start();
+    console.log("[SR] recognition.start() called OK");
+  } catch (e) {
+    console.warn("[SR] recognition.start() failed:", e);
+    stopRecording();
+  }
 }
 
 function stopRecording() {
@@ -732,9 +738,8 @@ function stopCurrentAudio() {
 }
 
 /**
- * 通过后端 /api/tts/stream 流式获取语音并播放。
- * 使用 MediaSource 实现边接收边播放，首包延迟低。
- * 失败时自动降级为浏览器内置语音。
+ * 通过后端 /api/tts 获取真人语音并播放。
+ * 使用流式接口减少等待时间，失败降级为浏览器语音。
  */
 async function speakText(text, bubbleEl) {
   const clean = text.replace(/<[^>]*>/g, "").trim();
@@ -744,12 +749,13 @@ async function speakText(text, bubbleEl) {
 
   const voiceId = selectedVoice?.id || "doubao";
   const reqId = ++ttsRequestId;
+  const t0 = performance.now();
 
   try {
     ttsAbortCtrl = new AbortController();
     currentIndicator = addSpeakingIndicator(bubbleEl);
 
-    const resp = await fetch("/api/tts/stream", {
+    const resp = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: clean, voice_id: voiceId }),
@@ -761,27 +767,52 @@ async function speakText(text, bubbleEl) {
     if (!resp.ok) {
       let detail = "TTS 请求失败";
       try { detail = (await resp.json()).detail || detail; } catch {}
-      console.warn("[TTS] Backend error (" + resp.status + "):", detail);
+      console.warn("[TTS] Error (" + resp.status + "):", detail);
       removeSpeakingIndicator(currentIndicator);
       currentIndicator = null;
       speakTextFallback(clean, bubbleEl);
       return;
     }
 
-    // 尝试 MediaSource 流式播放（Chrome/Edge 支持 audio/mpeg）
-    const played = await playStreamMSE(resp, reqId);
-    if (played) return;
-
-    // MSE 不支持时，降级：读完 blob 再播放
     const audioBlob = await resp.blob();
+    const t1 = performance.now();
+    console.log("[TTS] Got audio:", audioBlob.size, "bytes in", Math.round(t1 - t0), "ms");
+
     if (reqId !== ttsRequestId) return;
+
     if (audioBlob.size === 0) {
       removeSpeakingIndicator(currentIndicator);
       currentIndicator = null;
       speakTextFallback(clean, bubbleEl);
       return;
     }
-    await playBlobAudio(audioBlob, reqId);
+
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    currentAudio = audio;
+    currentAudioUrl = audioUrl;
+
+    audio.onplaying = () => {
+      console.log("[TTS] Playback started in", Math.round(performance.now() - t0), "ms total");
+    };
+    audio.onended = () => {
+      if (reqId !== ttsRequestId) return;
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+      URL.revokeObjectURL(audioUrl);
+      currentAudioUrl = null;
+      currentAudio = null;
+    };
+    audio.onerror = () => {
+      if (reqId !== ttsRequestId) return;
+      removeSpeakingIndicator(currentIndicator);
+      currentIndicator = null;
+      URL.revokeObjectURL(audioUrl);
+      currentAudioUrl = null;
+      currentAudio = null;
+    };
+
+    await audio.play();
   } catch (e) {
     if (e.name === "AbortError") return;
     console.warn("[TTS] Failed, falling back:", e);
@@ -791,115 +822,6 @@ async function speakText(text, bubbleEl) {
     }
     speakTextFallback(clean, bubbleEl);
   }
-}
-
-/** MediaSource 流式播放：边接收边播放，首包即响 */
-async function playStreamMSE(resp, reqId) {
-  try {
-    if (!window.MediaSource) return false;
-    const ms = new MediaSource();
-    const audioUrl = URL.createObjectURL(ms);
-    const audio = new Audio(audioUrl);
-    currentAudio = audio;
-    currentAudioUrl = audioUrl;
-
-    return new Promise((resolve) => {
-      let sourceBuffer = null;
-      let chunks = [];
-      let reader = null;
-      let readDone = false;
-
-      ms.addEventListener("sourceopen", async () => {
-        try {
-          sourceBuffer = ms.addSourceBuffer("audio/mpeg");
-          sourceBuffer.addEventListener("updateend", () => {
-            // 如果还有积压数据，继续追加
-            if (chunks.length > 0) {
-              try { sourceBuffer.appendBuffer(chunks.shift()); }
-              catch {}
-            } else if (readDone) {
-              try { ms.endOfStream(); }
-              catch {}
-            }
-          });
-
-          // 开始读取流
-          reader = resp.body.getReader();
-          resolve(true);
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              readDone = true;
-              // 如果 buffer 空闲，结束流
-              if (chunks.length === 0 && sourceBuffer && !sourceBuffer.updating) {
-                try { ms.endOfStream(); } catch {}
-              }
-              break;
-            }
-            if (reqId !== ttsRequestId) { reader.cancel(); break; }
-
-            if (sourceBuffer && !sourceBuffer.updating && chunks.length === 0) {
-              try { sourceBuffer.appendBuffer(value.buffer); } catch { chunks.push(value.buffer); }
-            } else {
-              chunks.push(value.buffer);
-            }
-          }
-        } catch (e) {
-          console.warn("[TTS] MSE stream error:", e);
-          resolve(false);
-        }
-      });
-
-      audio.onended = () => {
-        if (reqId !== ttsRequestId) return;
-        removeSpeakingIndicator(currentIndicator);
-        currentIndicator = null;
-        URL.revokeObjectURL(audioUrl);
-        currentAudioUrl = null;
-        currentAudio = null;
-      };
-      audio.onerror = () => {
-        if (reqId !== ttsRequestId) return;
-        removeSpeakingIndicator(currentIndicator);
-        currentIndicator = null;
-        URL.revokeObjectURL(audioUrl);
-        currentAudioUrl = null;
-        currentAudio = null;
-        resolve(false);
-      };
-
-      audio.play().catch(() => resolve(false));
-    });
-  } catch {
-    return false;
-  }
-}
-
-/** 播放完整 blob（降级方案） */
-async function playBlobAudio(blob, reqId) {
-  const audioUrl = URL.createObjectURL(blob);
-  const audio = new Audio(audioUrl);
-  currentAudio = audio;
-  currentAudioUrl = audioUrl;
-
-  audio.onended = () => {
-    if (reqId !== ttsRequestId) return;
-    removeSpeakingIndicator(currentIndicator);
-    currentIndicator = null;
-    URL.revokeObjectURL(audioUrl);
-    currentAudioUrl = null;
-    currentAudio = null;
-  };
-  audio.onerror = () => {
-    if (reqId !== ttsRequestId) return;
-    removeSpeakingIndicator(currentIndicator);
-    currentIndicator = null;
-    URL.revokeObjectURL(audioUrl);
-    currentAudioUrl = null;
-    currentAudio = null;
-  };
-  await audio.play();
 }
 
 /** 浏览器内置语音降级方案 */
