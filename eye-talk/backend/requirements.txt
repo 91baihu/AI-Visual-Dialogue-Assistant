@@ -6,3 +6,7 @@ openai
 pillow
 httpx
 edge-tts
+SpeechRecognition
+pyaudio
+dashscope
+pydub

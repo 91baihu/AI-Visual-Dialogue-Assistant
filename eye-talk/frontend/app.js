@@ -52,7 +52,8 @@ let ws = null;
 let cameraStream = null;
 let recognition = null;
 let isRecording = false;
-let voiceBuffer = "";        // 语音识别累积缓冲
+let mediaRecorder = null;    // MediaRecorder 实例
+let audioChunks = [];        // 录音数据块
 let selectedVoice = null;    // 当前选中的 TTS 音色
 let aiTimeoutTimer = null;
 let reconnectTimer = null;
@@ -500,61 +501,127 @@ async function fetchStats() {
 setInterval(fetchStats, 5000);
 fetchStats();
 
-// ==================== Speech Recognition ====================
+// ==================== Speech Recognition (MediaRecorder + 后端 STT) ====================
 function initSpeechRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
+  // 检查浏览器是否支持 MediaRecorder
+  if (!window.MediaRecorder) {
     btnVoice.classList.add("unsupported");
     btnVoice.querySelector(".voice-label").textContent = "浏览器不支持";
-    btnVoice.title = "请使用 Chrome / Edge 等 Chromium 内核浏览器，并通过 localhost 或 HTTPS 访问";
-    btnVoice.addEventListener("click", () => addMessage("system", "🎤 当前浏览器不支持语音识别，请使用 Chrome 或 Edge 浏览器"));
-    return;
+    btnVoice.addEventListener("click", () => addMessage("system", "🎤 当前浏览器不支持录音，请使用 Chrome 或 Edge 浏览器"));
   }
+}
 
-  recognition = new SR();
-  recognition.lang = "zh-CN";
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
+async function startRecording() {
+  if (isRecording) return;
 
-  recognition.onresult = (event) => {
-    let interim = "", finalText = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalText += t;
-      else interim += t;
+  // 打断当前 TTS 播放
+  stopCurrentAudio();
+
+  isRecording = true;
+  audioChunks = [];
+  btnVoice.classList.add("recording");
+  btnVoice.querySelector(".voice-label").textContent = "录音中…松开识别";
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+
+    // 同时启动声波可视化
+    micStream = stream;
+    initAudioVisualization();
+    if (audioContext && audioContext.state === "suspended") await audioContext.resume();
+    const source = audioContext.createMediaStreamSource(stream);
+    source.connect(analyser);
+    const btnRect = btnVoice.getBoundingClientRect();
+    voiceWaveCanvas.width = btnRect.width * window.devicePixelRatio;
+    voiceWaveCanvas.height = btnRect.height * window.devicePixelRatio;
+    waveCtx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+    drawWaveLoop();
+
+    // 优先用 WAV（后端兼容性最好），降级 webm
+    let mimeType = "audio/webm;codecs=opus";
+    if (MediaRecorder.isTypeSupported("audio/wav")) {
+      mimeType = "audio/wav";
+    } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+      mimeType = "audio/ogg;codecs=opus";
     }
-    // 累积所有 final 结果到缓冲区，保证整段语音完整
-    if (finalText) voiceBuffer += finalText;
-    // 实时写入输入框：缓冲区 + 当前 interim
-    textInput.value = voiceBuffer + interim;
-    if (interim) {
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    console.log("[STT] Recording with mimeType:", mimeType);
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      stopAudioVisualization();
+
+      if (audioChunks.length === 0) return;
+      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+      audioChunks = [];
+
+      if (audioBlob.size < 500) {
+        addMessage("system", "🎤 录音太短，请长按说话");
+        return;
+      }
+
+      // 显示识别中状态
       interimBar.classList.add("active");
-      interimText.textContent = interim;
-    } else {
-      interimBar.classList.remove("active");
-      interimText.textContent = "";
-    }
-  };
+      interimText.textContent = "正在识别…";
 
-  recognition.onerror = (event) => {
-    console.log("[SR] error:", event.error);
-    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-      addMessage("system", "🎤 麦克风权限被拒绝，请在浏览器地址栏允许麦克风权限");
+      try {
+        const resp = await fetch("/api/stt", {
+          method: "POST",
+          headers: { "Content-Type": "audio/webm" },
+          body: audioBlob,
+        });
+        const result = await resp.json();
+
+        interimBar.classList.remove("active");
+        interimText.textContent = "";
+
+        if (result.success && result.text) {
+          textInput.value = result.text;
+          console.log("[STT] Recognized:", result.text);
+        } else {
+          const errMsg = result.error || "未能识别语音";
+          console.warn("[STT] Failed:", errMsg);
+          addMessage("system", "🎤 " + errMsg);
+        }
+      } catch (e) {
+        interimBar.classList.remove("active");
+        interimText.textContent = "";
+        console.warn("[STT] Request error:", e);
+        addMessage("system", "🎤 语音识别请求失败，请检查网络");
+      }
+    };
+
+    mediaRecorder.start(100); // 每 100ms 收集一次数据
+    console.log("[STT] Recording started");
+  } catch (e) {
+    console.warn("[STT] getUserMedia failed:", e);
+    isRecording = false;
+    btnVoice.classList.remove("recording");
+    btnVoice.querySelector(".voice-label").textContent = "按住说话";
+    stopAudioVisualization();
+    if (e.name === "NotAllowedError") {
+      addMessage("system", "🎤 麦克风权限被拒绝，请在浏览器地址栏允许");
       btnVoice.classList.add("unsupported");
-      btnVoice.querySelector(".voice-label").textContent = "权限被拒";
-      stopRecording();
     }
-    // no-speech / aborted / network 等错误不停止录音，让 onend 自动重启
-  };
+  }
+}
 
-  // 持续模式：识别结束后自动重启（除非用户已松手）
-  recognition.onend = () => {
-    console.log("[SR] ended, isRecording=", isRecording);
-    if (isRecording) {
-      try { recognition.start(); } catch (e) { console.warn("[SR] restart failed:", e); }
-    }
-  };
+function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+  btnVoice.classList.remove("recording");
+  btnVoice.querySelector(".voice-label").textContent = "按住说话";
+
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+  }
+  // 声波可视化在 mediaRecorder.onstop 中清理
 }
 
 // ==================== Audio Visualization ====================
@@ -656,34 +723,6 @@ function stopAudioVisualization() {
   }
 }
 
-function startRecording() {
-  if (!recognition || isRecording) return;
-  console.log("[SR] Starting recognition...");
-  isRecording = true;
-  voiceBuffer = "";  // 清空缓冲区，开始新一轮录音
-  btnVoice.classList.add("recording");
-  btnVoice.querySelector(".voice-label").textContent = "松开结束";
-  startAudioVisualization();  // 启动声波动画
-  try {
-    recognition.start();
-    console.log("[SR] recognition.start() called OK");
-  } catch (e) {
-    console.warn("[SR] recognition.start() failed:", e);
-    stopRecording();
-  }
-}
-
-function stopRecording() {
-  if (!isRecording) return;
-  isRecording = false;
-  btnVoice.classList.remove("recording");
-  btnVoice.querySelector(".voice-label").textContent = "按住说话";
-  interimBar.classList.remove("active");
-  interimText.textContent = "";
-  stopAudioVisualization();   // 停止声波动画，释放麦克风
-  if (recognition) try { recognition.stop(); } catch {}
-  // 语音识别结果已实时写入 textInput，用户可按发送键
-}
 
 btnVoice.addEventListener("mousedown", (e) => { e.preventDefault(); startRecording(); });
 btnVoice.addEventListener("mouseup",   (e) => { e.preventDefault(); stopRecording();  });

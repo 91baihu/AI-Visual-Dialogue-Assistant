@@ -7,7 +7,7 @@ from dotenv import load_dotenv, set_key
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, field_validator
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +15,7 @@ import uvicorn
 
 from ai_service import ChatService, PROVIDER_CONFIG, get_api_key_env_name
 from tts_service import synthesize_speech, synthesize_speech_stream, get_voice_list
+from stt_service import transcribe_audio
 
 load_dotenv()
 
@@ -233,6 +234,18 @@ async def tts_stream(req: TTSRequest):
         media_type="audio/mpeg",
         headers={"X-Content-Type-Options": "nosniff"},
     )
+
+
+@app.post("/api/stt")
+async def stt_transcribe(request: Request):
+    """接收音频数据，转写为文字（DashScope Paraformer / Google）。"""
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="未收到音频数据")
+
+    mime_type = request.headers.get("content-type", "audio/webm")
+    result = await transcribe_audio(body, mime_type)
+    return result
 
 
 @app.get("/api/config")

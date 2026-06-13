@@ -136,8 +136,8 @@ img {
 }
 
 .nav-logo-icon {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
 }
 
 .nav-logo span {
@@ -301,13 +301,13 @@ img {
 .hero-icon-wrapper {
   display: flex;
   justify-content: center;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
   animation: fadeInUp 0.8s ease 0.05s both;
 }
 
 .hero-icon {
-  width: 80px;
-  height: 80px;
+  width: 48px;
+  height: 48px;
   filter: drop-shadow(0 0 24px rgba(59, 130, 246, 0.4));
   animation: iconPulse 3s ease-in-out infinite;
 }
