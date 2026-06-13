@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EyeTalk — AI 视觉对话助手</title>
+  <meta name="description" content="让 AI 看见你的世界，实时视觉理解与自然对话的完美融合" />
+  <meta name="theme-color" content="#0B0D17" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="apple-touch-icon" href="favicon.svg" />
+  <link rel="stylesheet" href="landing.css" />
+</head>
+<body>
+
+  <!-- ==================== Navigation ==================== -->
+  <nav class="nav">
+    <div class="container nav-inner">
+      <a href="landing.html" class="nav-logo"><img src="favicon.svg" alt="EyeTalk" class="nav-logo-icon" /><span>EyeTalk</span></a>
+      <ul class="nav-links">
+        <li><a href="#features">功能特性</a></li>
+        <li><a href="#architecture">技术架构</a></li>
+        <li><a href="#background">关于我们</a></li>
+      </ul>
+      <a href="/app/" class="btn btn-primary nav-cta">进入系统</a>
+    </div>
+  </nav>
+
+  <!-- ==================== Hero ==================== -->
+  <section class="hero">
+    <!-- 背景装饰 -->
+    <div class="hero-grid"></div>
+    <div class="hero-glow hero-glow--blue"></div>
+    <div class="hero-glow hero-glow--purple"></div>
+    <div class="hero-glow hero-glow--cyan"></div>
+
+    <div class="hero-content">
+      <div class="hero-icon-wrapper">
+        <img src="favicon.svg" alt="EyeTalk" class="hero-icon" />
+      </div>
+
+      <div class="hero-badge">
+        <span class="dot"></span>
+        多模态 AI · 实时视觉交互
+      </div>
+
+      <h1 class="hero-title">
+        <span class="gradient-text">EyeTalk</span> — AI 视觉对话助手
+      </h1>
+
+      <p class="hero-subtitle">
+        让 AI 看见你的世界，实时视觉理解与自然对话的完美融合
+      </p>
+
+      <div class="hero-actions">
+        <a href="/app/" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          进入系统
+        </a>
+        <a href="/docs" class="btn btn-secondary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          查看文档
+        </a>
+      </div>
+
+      <!-- 统计数据 -->
+      <div class="hero-stats">
+        <div class="stat-item">
+          <span class="stat-number" data-count="5" data-suffix="+">0</span>
+          <span class="stat-label">AI 提供商</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <span class="stat-number" data-count="6" data-suffix="">0</span>
+          <span class="stat-label">核心功能</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <span class="stat-number" data-count="100" data-suffix="%">0</span>
+          <span class="stat-label">原生实现</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Features ==================== -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="text-center reveal">
+        <span class="section-label">Core Features</span>
+        <h2 class="section-title">六大核心能力</h2>
+        <p class="section-desc">从实时视觉理解到多模型切换，EyeTalk 提供完整的 AI 视觉对话解决方案</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- 1 -->
+        <div class="feature-card reveal">
+          <div class="feature-icon">🎥</div>
+          <h3>实时视觉理解</h3>
+          <p>AI 实时识别摄像头中的物体、场景、文字，将视觉信息转化为可理解的语义描述</p>
+        </div>
+        <!-- 2 -->
+        <div class="feature-card reveal">
+          <div class="feature-icon">🎙️</div>
+          <h3>语音交互</h3>
+          <p>按住说话，语音识别结果自动发送，解放双手，让对话更自然流畅</p>
+        </div>
+        <!-- 3 -->
+        <div class="feature-card reveal">
+          <div class="feature-icon">🔍</div>
+          <h3>智能帧采样</h3>
+          <p>基于 MSE 差异检测算法，静止画面不重复调用 AI，节省资源、提升效率</p>
+        </div>
+        <!-- 4 -->
+        <div class="feature-card reveal">
+          <div class="feature-icon">👁️‍🗨️</div>
+          <h3>自动观察</h3>
+          <p>每 2 秒检测画面变化，自动通知 AI 介入分析，无需手动操作</p>
+        </div>
+        <!-- 5 -->
+        <div class="feature-card reveal">
+          <div class="feature-icon">⚡</div>
+          <h3>快捷指令</h3>
+          <p>一键触发 OCR 识别、翻译、物体识别、场景描述等高频操作</p>
+        </div>
+        <!-- 6 -->
+        <div class="feature-card reveal">
+          <div class="feature-icon">🔄</div>
+          <h3>多模型切换</h3>
+          <p>支持 5 家 AI 提供商一键切换，灵活选择最适合的模型服务</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Architecture ==================== -->
+  <section class="architecture" id="architecture">
+    <div class="container">
+      <div class="text-center reveal">
+        <span class="section-label">Architecture</span>
+        <h2 class="section-title">技术架构</h2>
+        <p class="section-desc">轻量前端 + 高性能后端 + 多提供商 AI 服务，三层协同</p>
+      </div>
+
+      <div class="arch-wrapper reveal">
+        <!-- 三层架构 -->
+        <div class="arch-layers">
+          <div class="arch-layer">
+            <div class="arch-layer-icon">🖥️</div>
+            <h3>前端层</h3>
+            <p>零依赖原生实现，摄像头采集、语音交互、实时渲染</p>
+            <span class="tech-tag">HTML + CSS + JavaScript</span>
+          </div>
+          <div class="arch-layer">
+            <div class="arch-layer-icon">⚙️</div>
+            <h3>后端层</h3>
+            <p>异步高性能服务，WebSocket 实时通信，流式响应推送</p>
+            <span class="tech-tag">Python FastAPI + WebSocket</span>
+          </div>
+          <div class="arch-layer">
+            <div class="arch-layer-icon">🧠</div>
+            <h3>AI 服务层</h3>
+            <p>统一 OpenAI 兼容格式接入，动态提供商切换</p>
+            <span class="tech-tag">多提供商 OpenAI 兼容</span>
+          </div>
+        </div>
+
+        <!-- 提供商列表 -->
+        <div class="providers-section">
+          <h3>支持的 AI 提供商</h3>
+          <div class="providers-grid">
+            <div class="provider-chip">
+              <div class="provider-logo" style="color:#06B6D4;background:rgba(6,182,212,0.12)">Q</div>
+              通义千问
+            </div>
+            <div class="provider-chip">
+              <div class="provider-logo" style="color:#3B82F6;background:rgba(59,130,246,0.12)">K</div>
+              Kimi
+            </div>
+            <div class="provider-chip">
+              <div class="provider-logo" style="color:#8B5CF6;background:rgba(139,92,246,0.12)">D</div>
+              DeepSeek
+            </div>
+            <div class="provider-chip">
+              <div class="provider-logo" style="color:#EC4899;background:rgba(236,72,153,0.12)">Z</div>
+              智谱 AI
+            </div>
+            <div class="provider-chip">
+              <div class="provider-logo" style="color:#F59E0B;background:rgba(245,158,11,0.12)">O</div>
+              OpenAI
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Background ==================== -->
+  <section class="background" id="background">
+    <div class="container">
+      <div class="text-center reveal">
+        <span class="section-label">About</span>
+        <h2 class="section-title">项目背景</h2>
+        <p class="section-desc">源于真实的工程实践，探索 AI 视觉交互的可能性</p>
+      </div>
+
+      <div class="bg-card reveal">
+        <div class="bg-items">
+          <div class="bg-item">
+            <div class="bg-item-icon">🏢</div>
+            <div class="bg-item-text">
+              <h3>七牛云 XEngineer 暑期实训营 · 第四批次 · 题目一</h3>
+              <p>EyeTalk 诞生于七牛云 XEngineer 暑期实训营，作为第四批次的核心课题之一，承载着团队对 AI 视觉交互的探索与实践。</p>
+            </div>
+          </div>
+          <div class="bg-item">
+            <div class="bg-item-icon">🎯</div>
+            <div class="bg-item-text">
+              <h3>项目定位</h3>
+              <p>基于多模态 AI 的实时视觉对话助手，将摄像头画面与大语言模型深度融合，让用户能够通过自然对话的方式获取视觉信息。</p>
+            </div>
+          </div>
+          <div class="bg-item">
+            <div class="bg-item-icon">🚀</div>
+            <div class="bg-item-text">
+              <h3>开发目标</h3>
+              <p>探索 AI 视觉理解与实时交互的结合，验证多模态模型在实际场景中的应用潜力，打造流畅自然的人机视觉对话体验。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Footer ==================== -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <p class="footer-copy">&copy; 2025 EyeTalk. Built with ❤️ during Qiniu XEngineer Summer Camp.</p>
+      <div class="footer-links">
+        <a href="https://github.com" target="_blank" rel="noopener">GitHub</a>
+        <a href="/docs">API 文档</a>
+        <a href="/app/">进入系统</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="landing.js"></script>
+</body>
+</html>
