@@ -61,7 +61,13 @@ def merge_stats(token_usage):
 @app.get("/")
 async def root():
     """Redirect to frontend app"""
-    return RedirectResponse(url="/app")
+    return RedirectResponse(url="/app/")
+
+
+@app.get("/app")
+async def app_no_slash():
+    """Redirect /app to /app/ so StaticFiles(html=True) can find index.html"""
+    return RedirectResponse(url="/app/")
 
 
 @app.get("/api/health")
@@ -166,6 +172,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Mount frontend static files under /app to avoid conflicting with API routes
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+print(f"[DEBUG] FRONTEND_DIR resolved to: {FRONTEND_DIR}")
+print(f"[DEBUG] FRONTEND_DIR exists: {FRONTEND_DIR.exists()}")
+print(f"[DEBUG] index.html exists: {(FRONTEND_DIR / 'index.html').exists()}")
 app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 
