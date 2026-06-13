@@ -3,7 +3,7 @@
 // ============================================================
 
 const WS_URL = "ws://localhost:8000/ws";
-const AI_TIMEOUT = 15000;
+const AI_TIMEOUT = 60000;
 const RECONNECT_INTERVAL = 3000;
 const AUTO_SAMPLE_INTERVAL = 2000;
 const FRAME_DIFF_THRESHOLD = 15;
