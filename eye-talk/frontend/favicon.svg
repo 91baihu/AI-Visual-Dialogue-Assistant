@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="50%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+  </defs>
+  <!-- 眼睛外轮廓 -->
+  <path d="M40 256C40 256 120 120 256 120C392 120 472 256 472 256C472 256 392 392 256 392C120 392 40 256 40 256Z" fill="url(#g1)" opacity="0.15" stroke="url(#g1)" stroke-width="18" stroke-linejoin="round"/>
+  <!-- 虹膜外圈 -->
+  <circle cx="256" cy="256" r="100" fill="none" stroke="url(#g1)" stroke-width="14"/>
+  <!-- 瞳孔 -->
+  <circle cx="256" cy="256" r="52" fill="url(#g1)"/>
+  <!-- 镜头高光 -->
+  <circle cx="232" cy="232" r="18" fill="white" opacity="0.6"/>
+  <!-- 摄像头小三角（播放/录制指示） -->
+  <path d="M244 244L290 268L244 292Z" fill="white" opacity="0.85"/>
+  <!-- 睫毛/光线装饰 -->
+  <line x1="256" y1="80" x2="256" y2="110" stroke="url(#g2)" stroke-width="8" stroke-linecap="round" opacity="0.5"/>
+  <line x1="370" y1="130" x2="350" y2="152" stroke="url(#g2)" stroke-width="8" stroke-linecap="round" opacity="0.4"/>
+  <line x1="142" y1="130" x2="162" y2="152" stroke="url(#g2)" stroke-width="8" stroke-linecap="round" opacity="0.4"/>
+</svg>

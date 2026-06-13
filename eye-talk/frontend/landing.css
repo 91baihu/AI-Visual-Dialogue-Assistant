@@ -127,9 +127,17 @@ img {
 }
 
 .nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.5px;
+}
+
+.nav-logo-icon {
+  width: 32px;
+  height: 32px;
 }
 
 .nav-logo span {
@@ -287,6 +295,26 @@ img {
   z-index: 1;
   max-width: 800px;
   animation: fadeInUp 0.8s ease both;
+}
+
+/* Hero 大号项目图标 */
+.hero-icon-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 28px;
+  animation: fadeInUp 0.8s ease 0.05s both;
+}
+
+.hero-icon {
+  width: 80px;
+  height: 80px;
+  filter: drop-shadow(0 0 24px rgba(59, 130, 246, 0.4));
+  animation: iconPulse 3s ease-in-out infinite;
+}
+
+@keyframes iconPulse {
+  0%, 100% { filter: drop-shadow(0 0 24px rgba(59, 130, 246, 0.4)); }
+  50%      { filter: drop-shadow(0 0 36px rgba(139, 92, 246, 0.6)); }
 }
 
 .hero-badge {
