@@ -86,6 +86,70 @@ function scrollToBottom() {
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
+// ==================== TTS (Web Speech API) ====================
+let currentUtterance = null;
+let currentSpeakBtn = null;
+
+function speakText(text, btnEl) {
+  if (!window.speechSynthesis) return;
+  // 停止当前朗读
+  window.speechSynthesis.cancel();
+
+  // 清除 HTML 标签
+  const clean = text.replace(/<[^>]*>/g, "").trim();
+  if (!clean) return;
+
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.lang = "zh-CN";
+  utter.rate = 1.0;
+  utter.pitch = 1.0;
+
+  // 尝试选择中文语音
+  const voices = window.speechSynthesis.getVoices();
+  const zhVoice = voices.find(v => v.lang.startsWith("zh")) || null;
+  if (zhVoice) utter.voice = zhVoice;
+
+  currentUtterance = utter;
+  currentSpeakBtn = btnEl;
+
+  // 更新按钮状态
+  if (btnEl) {
+    btnEl.textContent = "⏸";
+    btnEl.classList.add("speaking");
+  }
+
+  utter.onend = () => {
+    resetSpeakBtn();
+  };
+  utter.onerror = () => {
+    resetSpeakBtn();
+  };
+
+  window.speechSynthesis.speak(utter);
+}
+
+function stopSpeaking() {
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  resetSpeakBtn();
+}
+
+function resetSpeakBtn() {
+  if (currentSpeakBtn) {
+    currentSpeakBtn.textContent = "🔊";
+    currentSpeakBtn.classList.remove("speaking");
+  }
+  currentUtterance = null;
+  currentSpeakBtn = null;
+}
+
+function toggleSpeak(text, btnEl) {
+  if (btnEl && btnEl.classList.contains("speaking")) {
+    stopSpeaking();
+  } else {
+    speakText(text, btnEl);
+  }
+}
+
 // ==================== Messages (with avatars) ====================
 function addMessage(role, content) {
   const wrapper = document.createElement("div");
@@ -112,6 +176,15 @@ function addMessage(role, content) {
     const bubble = document.createElement("div");
     bubble.className = "bubble bubble-ai";
     bubble.innerHTML = content;
+
+    // 朗读按钮
+    const speakBtn = document.createElement("button");
+    speakBtn.className = "btn-speak";
+    speakBtn.textContent = "🔊";
+    speakBtn.title = "朗读 / 停止";
+    speakBtn.addEventListener("click", () => toggleSpeak(content, speakBtn));
+    bubble.appendChild(speakBtn);
+
     wrapper.appendChild(avatar);
     wrapper.appendChild(bubble);
   }
@@ -323,6 +396,9 @@ function connectWS() {
         const wrapper = addMessage("ai", data.text);
         lastAIReply = data.text;
         if (data.usage) updateStats(data.usage);
+        // 自动朗读 AI 回复
+        const speakBtn = wrapper.querySelector(".btn-speak");
+        speakText(data.text, speakBtn);
 
       } else {
         removeThinking();
@@ -1204,3 +1280,11 @@ if (savedProvider && providerSelect) providerSelect.value = savedProvider;
 
 connectWS();
 initSpeechRecognition();
+
+// Pre-load TTS voices (some browsers load async)
+if (window.speechSynthesis) {
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", () => {
+    window.speechSynthesis.getVoices();
+  });
+}

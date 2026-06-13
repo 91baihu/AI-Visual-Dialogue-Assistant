@@ -607,6 +607,45 @@ body {
   display: block;
 }
 
+/* Speak button */
+.btn-speak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mi-text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  margin-left: 6px;
+  vertical-align: middle;
+  opacity: 0.4;
+  transition: all var(--mi-duration) var(--mi-ease);
+}
+
+.bubble:hover .btn-speak {
+  opacity: 1;
+}
+
+.btn-speak:hover {
+  background: rgba(59,130,246,0.15);
+  color: var(--mi-accent);
+}
+
+.btn-speak.speaking {
+  opacity: 1;
+  color: var(--mi-accent);
+  animation: speakPulse 1.5s infinite;
+}
+
+@keyframes speakPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
 /* Thinking animation */
 .thinking {
   display: inline-flex;
