@@ -95,8 +95,12 @@ function speakText(text, btnEl) {
   // 停止当前朗读
   window.speechSynthesis.cancel();
 
-  // 清除 HTML 标签
-  const clean = text.replace(/<[^>]*>/g, "").trim();
+  // 清除 HTML 标签、emoji 表情、装饰符号
+  const clean = text
+    .replace(/<[^>]*>/g, "")
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{2B50}\u{2B55}]/gu, "")
+    .replace(/[★●►▶◆◇■□▲△•·※✨❗✅❌⚡❤️➡️⬅️⬆️⬇️]/g, "")
+    .trim();
   if (!clean) return;
 
   const utter = new SpeechSynthesisUtterance(clean);
@@ -583,7 +587,7 @@ let sttFallbackMode = false;     // 是否使用 Web Speech API 降级模式
 let sttTimeoutTimer = null;      // 超时计时器
 
 const STT_WS_URL = "ws://localhost:8000/ws/stt";
-const STT_TIMEOUT = 15000;       // 15秒无结果超时
+const STT_TIMEOUT = 30000;       // 30秒无结果超时
 const STT_PCM_BUFFER_SIZE = 4096; // ScriptProcessor buffer size
 const STT_SAMPLE_RATE = 16000;   // 目标采样率
 

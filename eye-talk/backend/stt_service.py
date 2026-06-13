@@ -17,9 +17,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # VAD 参数
-VAD_SILENCE_THRESHOLD = 300      # PCM 16-bit 静音阈值（振幅）
-VAD_SILENCE_DURATION_MS = 1500   # 连续静音超过此值则判定说话结束
+VAD_SILENCE_THRESHOLD = 200      # PCM 16-bit 静音阈值（振幅），越低越灵敏
+VAD_SILENCE_DURATION_MS = 3000   # 连续静音超过此值则判定说话结束（自然停顿约2-3秒）
 VAD_MIN_SPEECH_MS = 300          # 最短有效语音时长
+VAD_MAX_BUFFER_SEC = 15          # 缓冲区最大音频时长（秒），超过则强制识别
 SAMPLE_RATE = 16000
 CHANNELS = 1
 SAMPLE_WIDTH = 2  # 16-bit
@@ -102,6 +103,22 @@ class StreamTranscriber:
                     # 太短，可能是噪声，重置
                     logger.info(f"[STT-VAD] Speech too short ({speech_duration_ms:.0f}ms), discarding")
                     self._reset()
+
+        # 缓冲区大小保护：音频时长超过上限时强制识别，防止长语音无结果
+        buffer_duration_sec = len(self._pcm_buffer) / (SAMPLE_RATE * SAMPLE_WIDTH)
+        if buffer_duration_sec >= VAD_MAX_BUFFER_SEC:
+            if self._is_speaking:
+                logger.info(f"[STT-VAD] Buffer limit reached ({buffer_duration_sec:.1f}s), forcing recognition")
+                result = self._do_recognize()
+                # 保持 speaking 状态，后续音频会继续累积
+                self._is_speaking = True
+                self._speech_start = time.time()
+                self._last_voice_time = time.time()
+                if result and result.get("text"):
+                    return result
+            else:
+                # 没有检测到语音但缓冲区过大，清空
+                self._reset()
 
         return None
 
