@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import logging
@@ -178,12 +179,72 @@ print(f"[DEBUG] index.html exists: {(FRONTEND_DIR / 'index.html').exists()}")
 app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 
+def find_available_port(host, preferred_port, max_tries=10):
+    """Find an available port, starting with the preferred one."""
+    import socket
+    for i in range(max_tries):
+        port = preferred_port + i
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, port))
+                return port
+            except OSError:
+                continue
+    return None
+
+
+def get_port_occupier(port):
+    """Try to identify which process is using the given port."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if f":{port} " in line and "LISTENING" in line:
+                pid = line.strip().split()[-1]
+                return pid
+    except Exception:
+        pass
+    return None
+
+
 if __name__ == "__main__":
+    # Fix Windows terminal encoding for emoji/Chinese output
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
     HOST = "0.0.0.0"
-    PORT = 8000
+    PREFERRED_PORT = 8000
+
+    # Check port availability
+    PORT = find_available_port(HOST, PREFERRED_PORT)
+
+    if PORT is None:
+        pid = get_port_occupier(PREFERRED_PORT)
+        print("=" * 50)
+        print("  错误: 无法找到可用端口")
+        print("=" * 50)
+        print(f"  端口 {PREFERRED_PORT} 被占用")
+        if pid:
+            print(f"  占用进程 PID: {pid}")
+            print(f"  终止命令:     taskkill /F /PID {pid}")
+        print(f"  或手动指定其他端口: python main.py --port 9000")
+        print("=" * 50)
+        sys.exit(1)
+
+    if PORT != PREFERRED_PORT:
+        pid = get_port_occupier(PREFERRED_PORT)
+        print(f"  端口 {PREFERRED_PORT} 已被占用", end="")
+        if pid:
+            print(f" (PID: {pid})", end="")
+        print(f"，自动切换到端口 {PORT}")
 
     print("=" * 50)
-    print("  👁️  EyeTalk AI视觉对话助手")
+    print("  EyeTalk AI视觉对话助手")
     print("=" * 50)
     print(f"  后端API地址  → http://localhost:{PORT}")
     print(f"  前端页面地址 → http://localhost:{PORT}/")
