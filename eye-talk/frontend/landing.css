@@ -1,6 +1,6 @@
 /* ============================================================
-   EyeTalk Landing Page — 小米 HyperOS 风格
-   主色 #FF6900 | 背景 #1A1A1A | 卡片 #2C2C2C
+   EyeTalk Landing Page — 科技风深色主题
+   主色 #3B82F6 | 背景 #0A0E17 | 卡片 #111827
    ============================================================ */
 
 /* ---------- Reset ---------- */
@@ -12,22 +12,22 @@
 
 /* ---------- Root Variables ---------- */
 :root {
-  --bg:              #1A1A1A;
-  --bg-card:         #2C2C2C;
-  --bg-card-hover:   #333333;
-  --border:          #3A3A3A;
-  --text:            #FFFFFF;
-  --text-sub:        #AAAAAA;
-  --text-muted:      #666666;
-  --accent:          #FF6900;
-  --accent-hover:    #E55D00;
-  --accent-light:    #3D2800;
-  --success:         #00C853;
+  --bg:              #0A0E17;
+  --bg-card:         #111827;
+  --bg-card-hover:   #1A2332;
+  --border:          #1E293B;
+  --text:            #F0F0F0;
+  --text-sub:        #94A3B8;
+  --text-muted:      #475569;
+  --accent:          #3B82F6;
+  --accent-hover:    #2563EB;
+  --accent-light:    rgba(59,130,246,0.12);
+  --success:         #06B6D4;
   --radius:          16px;
   --radius-lg:       20px;
   --radius-full:     9999px;
-  --shadow:          0 2px 12px rgba(0, 0, 0, 0.25);
-  --shadow-lg:       0 8px 32px rgba(0, 0, 0, 0.4);
+  --shadow:          0 2px 12px rgba(59,130,246,0.08);
+  --shadow-lg:       0 8px 32px rgba(59,130,246,0.15);
   --ease:            cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-out:        cubic-bezier(0.22, 1, 0.36, 1);
   --font:            "MiSans", "PingFang SC", "Microsoft YaHei", -apple-system,
@@ -108,7 +108,7 @@ img {
   top: 0;
   z-index: 1000;
   padding: 14px 0;
-  background: rgba(26, 26, 26, 0.85);
+  background: rgba(10, 14, 23, 0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
@@ -116,7 +116,7 @@ img {
 }
 
 .nav.scrolled {
-  background: rgba(26, 26, 26, 0.95);
+  background: rgba(10, 14, 23, 0.95);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
 }
 
@@ -185,15 +185,15 @@ img {
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, #2563EB, #3B82F6);
   color: #fff;
-  box-shadow: 0 4px 16px rgba(255, 105, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(59,130,246,0.3);
 }
 
 .btn-primary:hover {
-  background: var(--accent-hover);
+  background: linear-gradient(135deg, #1D4ED8, #2563EB);
   transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(255, 105, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(59,130,246,0.4);
 }
 
 .btn-secondary {
@@ -229,7 +229,7 @@ img {
   left: -10%;
   width: 600px;
   height: 600px;
-  background: radial-gradient(circle, rgba(255, 105, 0, 0.12) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 65%);
   pointer-events: none;
 }
 
@@ -240,7 +240,7 @@ img {
   right: -8%;
   width: 500px;
   height: 500px;
-  background: radial-gradient(circle, rgba(255, 105, 0, 0.08) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 65%);
   pointer-events: none;
 }
 
@@ -255,7 +255,7 @@ img {
 .hero-glow--blue {
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, rgba(255, 105, 0, 0.2), transparent 70%);
+  background: radial-gradient(circle, rgba(59,130,246,0.25), transparent 70%);
   top: -80px;
   left: -60px;
 }
@@ -263,7 +263,7 @@ img {
 .hero-glow--purple {
   width: 350px;
   height: 350px;
-  background: radial-gradient(circle, rgba(255, 140, 51, 0.15), transparent 70%);
+  background: radial-gradient(circle, rgba(139,92,246,0.18), transparent 70%);
   bottom: -40px;
   right: -20px;
 }
@@ -271,7 +271,7 @@ img {
 .hero-glow--cyan {
   width: 300px;
   height: 300px;
-  background: radial-gradient(circle, rgba(255, 170, 0, 0.1), transparent 70%);
+  background: radial-gradient(circle, rgba(6,182,212,0.12), transparent 70%);
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -282,8 +282,8 @@ img {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255, 105, 0, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 105, 0, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
   background-size: 60px 60px;
   mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 20%, transparent 100%);
   -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 20%, transparent 100%);
@@ -307,13 +307,13 @@ img {
 .hero-icon {
   width: 48px;
   height: 48px;
-  filter: drop-shadow(0 0 24px rgba(255, 105, 0, 0.4));
+  filter: drop-shadow(0 0 24px rgba(59,130,246,0.4));
   animation: iconPulse 3s ease-in-out infinite;
 }
 
 @keyframes iconPulse {
-  0%, 100% { filter: drop-shadow(0 0 24px rgba(255, 105, 0, 0.4)); }
-  50%      { filter: drop-shadow(0 0 36px rgba(255, 105, 0, 0.6)); }
+  0%, 100% { filter: drop-shadow(0 0 24px rgba(59,130,246,0.4)); }
+  50%      { filter: drop-shadow(0 0 36px rgba(59,130,246,0.6)); }
 }
 
 .hero-badge {
@@ -335,7 +335,7 @@ img {
   height: 6px;
   border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 8px rgba(0, 200, 83, 0.6);
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
 }
 
 .hero-title {
@@ -348,7 +348,7 @@ img {
 }
 
 .hero-title .gradient-text {
-  background: linear-gradient(135deg, #FF6900 0%, #FF8C33 50%, #FFA500 100%);
+  background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 50%, #06B6D4 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -451,7 +451,7 @@ img {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--accent), #FFA500);
+  background: linear-gradient(90deg, #3B82F6, #8B5CF6);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
@@ -476,13 +476,13 @@ img {
   justify-content: center;
   font-size: 26px;
   margin-bottom: 20px;
-  background: var(--accent-light);
-  border: 1px solid rgba(255, 105, 0, 0.15);
+  background: rgba(59,130,246,0.08);
+  border: 1px solid rgba(59,130,246,0.15);
   transition: background 0.3s ease;
 }
 
 .feature-card:hover .feature-icon {
-  background: rgba(255, 105, 0, 0.2);
+  background: rgba(59,130,246,0.15);
 }
 
 .feature-card h3 {
@@ -564,7 +564,7 @@ img {
   font-weight: 500;
   background: var(--accent-light);
   color: var(--accent);
-  border: 1px solid rgba(255, 105, 0, 0.2);
+  border: 1px solid rgba(59,130,246,0.2);
 }
 
 /* Providers */
@@ -648,7 +648,7 @@ img {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--accent), #FFA500);
+  background: linear-gradient(90deg, #3B82F6, #8B5CF6);
 }
 
 .bg-items {
@@ -673,7 +673,7 @@ img {
   justify-content: center;
   font-size: 20px;
   background: var(--accent-light);
-  border: 1px solid rgba(255, 105, 0, 0.15);
+  border: 1px solid rgba(59,130,246,0.15);
 }
 
 .bg-item-text h3 {

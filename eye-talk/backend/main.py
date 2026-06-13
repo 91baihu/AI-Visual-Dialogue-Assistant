@@ -9,14 +9,11 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from ai_service import ChatService, PROVIDER_CONFIG, get_api_key_env_name
-from tts_service import synthesize_speech, synthesize_speech_stream, get_voice_list
-import re
-import base64
 from stt_service import transcribe_audio, StreamTranscriber
 
 load_dotenv()
@@ -167,97 +164,6 @@ async def health_check():
 async def get_stats():
     with _global_stats_lock:
         return dict(_global_stats)
-
-
-# ==================== TTS Endpoints ====================
-
-@app.get("/api/tts/voices")
-async def tts_voices():
-    """Return available TTS voice list."""
-    return {"voices": get_voice_list()}
-
-
-class TTSRequest(BaseModel):
-    text: str
-    voice_id: str = "doubao"
-    speed_ratio: Optional[float] = 1.0
-    volume_ratio: Optional[float] = 1.0
-    pitch_ratio: Optional[float] = 1.0
-
-    @field_validator("text")
-    @classmethod
-    def validate_text(cls, v):
-        v = v.strip()
-        if not v:
-            raise ValueError("文本不能为空")
-        if len(v) > 5000:
-            raise ValueError("文本长度不能超过 5000 字符")
-        return v
-
-    @field_validator("voice_id")
-    @classmethod
-    def validate_voice_id(cls, v):
-        from tts_service import TTS_VOICE_CONFIG
-        if v not in TTS_VOICE_CONFIG:
-            raise ValueError(f"未知音色: {v}，可选值: {', '.join(TTS_VOICE_CONFIG.keys())}")
-        return v
-
-
-@app.post("/api/tts")
-async def tts_synthesize(req: TTSRequest):
-    """Synthesize speech and return complete MP3 (for preview/test)."""
-    audio = await synthesize_speech(
-        text=req.text,
-        voice_id=req.voice_id,
-        speed_ratio=req.speed_ratio or 1.0,
-        volume_ratio=req.volume_ratio or 1.0,
-        pitch_ratio=req.pitch_ratio or 1.0,
-    )
-    if not audio:
-        raise HTTPException(status_code=500, detail="语音合成失败")
-    return Response(content=audio, media_type="audio/mpeg")
-
-
-@app.post("/api/tts/stream")
-async def tts_stream(req: TTSRequest):
-    """Stream synthesized speech: audio chunks pushed as they are generated (low latency)."""
-    async def audio_generator():
-        async for chunk in synthesize_speech_stream(
-            text=req.text,
-            voice_id=req.voice_id,
-            speed_ratio=req.speed_ratio or 1.0,
-            volume_ratio=req.volume_ratio or 1.0,
-            pitch_ratio=req.pitch_ratio or 1.0,
-        ):
-            yield chunk
-
-    return StreamingResponse(
-        audio_generator(),
-        media_type="audio/mpeg",
-        headers={"X-Content-Type-Options": "nosniff"},
-    )
-
-
-class TTSVoiceRequest(BaseModel):
-    voice_id: str = "doubao"
-
-    @field_validator("voice_id")
-    @classmethod
-    def validate_voice_id(cls, v):
-        from tts_service import TTS_VOICE_CONFIG
-        if v not in TTS_VOICE_CONFIG:
-            raise ValueError(f"未知音色: {v}")
-        return v
-
-
-@app.post("/api/tts/preview")
-async def tts_preview(req: TTSVoiceRequest):
-    """Preview a voice pack with fixed test text."""
-    test_text = "你好，我是你的AI助手，很高兴认识你！"
-    audio = await synthesize_speech(text=test_text, voice_id=req.voice_id)
-    if not audio:
-        raise HTTPException(status_code=500, detail="语音合成失败")
-    return Response(content=audio, media_type="audio/mpeg")
 
 
 @app.post("/api/stt")
@@ -453,117 +359,6 @@ async def update_config(config: ConfigUpdate):
     }
 
 
-def _split_sentences(text: str) -> list:
-    """将文本按中文标点和英文标点分句。"""
-    text = re.sub(r'<[^>]*>', '', text).strip()
-    if not text:
-        return []
-    # 按中英文句号、问号、感叹号、换行分句
-    parts = re.split(r'(?<=[。！？\.\!\?\n])', text)
-    # 合并过短的片段到前一句
-    sentences = []
-    for p in parts:
-        p = p.strip()
-        if not p:
-            continue
-        if sentences and len(sentences[-1]) < 15:
-            sentences[-1] += p
-        else:
-            sentences.append(p)
-    # 如果只有一句且很长，按逗号再拆
-    if len(sentences) == 1 and len(sentences[0]) > 80:
-        long = sentences[0]
-        sentences = []
-        for seg in re.split(r'(?<=[，,;；])', long):
-            seg = seg.strip()
-            if seg:
-                sentences.append(seg)
-    return sentences[:10]  # 最多 10 句，避免过多请求
-
-
-# Track TTS cancel requests per connection
-_tts_cancel_flags: dict[int, bool] = {}
-
-
-async def _send_tts_chunks(ws, conn_id: int, text: str, voice_id: str):
-    """逐句合成语音，首句完成即推送，前2句预合成并行。"""
-    sentences = _split_sentences(text)
-    if not sentences:
-        return
-
-    total = len(sentences)
-    logger.info(f"[WS:{conn_id}] TTS: {total} sentences, voice={voice_id}")
-    t0 = time.time()
-
-    # 重置取消标志
-    _tts_cancel_flags[conn_id] = False
-
-    # Phase 1: 前2句并行预合成
-    first_batch = sentences[:2]
-    first_tasks = [
-        synthesize_speech(s, voice_id=voice_id)
-        for s in first_batch
-    ]
-    first_results = await asyncio.gather(*first_tasks, return_exceptions=True)
-
-    # 逐句推送前2句
-    for i, (sentence, audio) in enumerate(zip(first_batch, first_results)):
-        if _tts_cancel_flags.get(conn_id):
-            logger.info(f"[WS:{conn_id}] TTS cancelled at chunk {i}")
-            return
-        if isinstance(audio, Exception) or not audio:
-            logger.warning(f"[WS:{conn_id}] TTS chunk {i} failed: {audio}")
-            continue
-        try:
-            await ws.send_text(json.dumps({
-                "type": "audio",
-                "index": i,
-                "total": total,
-                "text": sentence[:50],
-                "data": base64.b64encode(audio).decode("ascii"),
-            }))
-            elapsed = time.time() - t0
-            logger.info(f"[WS:{conn_id}] TTS chunk {i}/{total} sent in {elapsed:.2f}s")
-        except Exception:
-            return
-
-    # Phase 2: 剩余句子逐句合成并推送
-    for i in range(2, total):
-        if _tts_cancel_flags.get(conn_id):
-            logger.info(f"[WS:{conn_id}] TTS cancelled at chunk {i}")
-            return
-        sentence = sentences[i]
-        try:
-            audio = await synthesize_speech(sentence, voice_id=voice_id)
-        except Exception as e:
-            logger.warning(f"[WS:{conn_id}] TTS chunk {i} failed: {e}")
-            continue
-        if not audio:
-            continue
-        try:
-            await ws.send_text(json.dumps({
-                "type": "audio",
-                "index": i,
-                "total": total,
-                "text": sentence[:50],
-                "data": base64.b64encode(audio).decode("ascii"),
-            }))
-            elapsed = time.time() - t0
-            logger.info(f"[WS:{conn_id}] TTS chunk {i}/{total} sent in {elapsed:.2f}s")
-        except Exception:
-            return
-
-    # 发送结束标记
-    try:
-        await ws.send_text(json.dumps({"type": "audio_end", "total": total}))
-    except Exception:
-        pass
-
-    elapsed = time.time() - t0
-    logger.info(f"[WS:{conn_id}] TTS done: {total} chunks in {elapsed:.2f}s")
-    _tts_cancel_flags.pop(conn_id, None)
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -587,8 +382,6 @@ async def websocket_endpoint(websocket: WebSocket):
             msg_type = data.get("type", "chat")
             text = data.get("text", "")
             image = data.get("image", "")
-            voice_id = data.get("voice_id", "doubao")
-
             if msg_type == "chat":
                 has_image = bool(image)
                 logger.info(f"[WS:{conn_id}] type=chat text={text!r} image={'yes' if has_image else 'no'}")
@@ -612,11 +405,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         "usage": ai_service.tokens.to_dict(),
                     }))
 
-                    # 立即分句并行合成语音，逐块推送
-                    asyncio.create_task(
-                        _send_tts_chunks(websocket, conn_id, reply, voice_id)
-                    )
-
                 except Exception as e:
                     elapsed = time.time() - start
                     logger.error(f"[WS:{conn_id}] API error after {elapsed:.2f}s: {e}")
@@ -630,19 +418,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "reply",
                         "text": error_msg,
                     }))
-
-            elif msg_type == "audio_cancel":
-                _tts_cancel_flags[conn_id] = True
-                logger.info(f"[WS:{conn_id}] TTS cancel requested")
-
-            elif msg_type == "audio_cancel":
-                # 客户端请求取消后续 TTS 合成
-                _tts_cancel_flags[conn_id] = True
-                logger.info(f"[WS:{conn_id}] TTS cancel requested")
-
-            elif msg_type == "audio_cancel":
-                _tts_cancel_flags[conn_id] = True
-                logger.info(f"[WS:{conn_id}] TTS cancel requested")
 
             elif msg_type == "clear":
                 ai_service.clear_history()
