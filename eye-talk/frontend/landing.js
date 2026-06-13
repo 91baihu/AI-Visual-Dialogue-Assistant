@@ -43,7 +43,7 @@
       var r = btn.getBoundingClientRect();
       var s = Math.max(r.width, r.height);
       var sp = document.createElement("span");
-      sp.style.cssText = "position:absolute;border-radius:50%;pointer-events:none;width:" + s + "px;height:" + s + "px;left:" + (e.clientX - r.left - s / 2) + "px;top:" + (e.clientY - r.top - s / 2) + "px;background:rgba(255,255,255,0.3);transform:scale(0);animation:ripple .6s ease-out forwards";
+      sp.style.cssText = "position:absolute;border-radius:50%;pointer-events:none;width:" + s + "px;height:" + s + "px;left:" + (e.clientX - r.left - s / 2) + "px;top:" + (e.clientY - r.top - s / 2) + "px;background:rgba(255,255,255,0.25);transform:scale(0);animation:ripple .6s ease-out forwards";
       btn.appendChild(sp);
       setTimeout(function () { sp.remove(); }, 700);
     });

@@ -17,7 +17,7 @@ from ai_service import ChatService, PROVIDER_CONFIG, get_api_key_env_name
 from tts_service import synthesize_speech, synthesize_speech_stream, get_voice_list
 import re
 import base64
-from stt_service import transcribe_audio
+from stt_service import transcribe_audio, StreamTranscriber
 
 load_dotenv()
 
@@ -238,6 +238,28 @@ async def tts_stream(req: TTSRequest):
     )
 
 
+class TTSVoiceRequest(BaseModel):
+    voice_id: str = "doubao"
+
+    @field_validator("voice_id")
+    @classmethod
+    def validate_voice_id(cls, v):
+        from tts_service import TTS_VOICE_CONFIG
+        if v not in TTS_VOICE_CONFIG:
+            raise ValueError(f"未知音色: {v}")
+        return v
+
+
+@app.post("/api/tts/preview")
+async def tts_preview(req: TTSVoiceRequest):
+    """Preview a voice pack with fixed test text."""
+    test_text = "你好，我是你的AI助手，很高兴认识你！"
+    audio = await synthesize_speech(text=test_text, voice_id=req.voice_id)
+    if not audio:
+        raise HTTPException(status_code=500, detail="语音合成失败")
+    return Response(content=audio, media_type="audio/mpeg")
+
+
 @app.post("/api/stt")
 async def stt_transcribe(request: Request):
     """接收音频数据，转写为文字（DashScope Paraformer / Google）。"""
@@ -248,6 +270,74 @@ async def stt_transcribe(request: Request):
     mime_type = request.headers.get("content-type", "audio/webm")
     result = await transcribe_audio(body, mime_type)
     return result
+
+
+@app.websocket("/ws/stt")
+async def stt_websocket(websocket: WebSocket):
+    """
+    流式语音识别 WebSocket 端点。
+    客户端发送二进制 PCM 16kHz 16bit mono 帧，
+    服务端实时返回 JSON 识别结果。
+    """
+    await websocket.accept()
+    conn_id = id(websocket)
+    transcriber = StreamTranscriber()
+    logger.info(f"[STT-WS:{conn_id}] client connected")
+
+    try:
+        while True:
+            message = await websocket.receive()
+
+            if message.get("type") == "websocket.receive":
+                # 二进制帧 = PCM 音频数据
+                if "bytes" in message and message["bytes"]:
+                    pcm_chunk = message["bytes"]
+                    result = transcriber.feed(pcm_chunk)
+                    if result:
+                        await websocket.send_text(json.dumps({
+                            "type": "stt_result",
+                            "text": result["text"],
+                            "is_final": result["is_final"],
+                            "confidence": result["confidence"],
+                            "duration_ms": result["duration_ms"],
+                        }))
+                        logger.info(f"[STT-WS:{conn_id}] result: {result['text'][:60]}")
+
+                # 文本帧 = 控制消息
+                elif "text" in message and message["text"]:
+                    try:
+                        data = json.loads(message["text"])
+                    except json.JSONDecodeError:
+                        continue
+
+                    msg_type = data.get("type", "")
+
+                    if msg_type == "end":
+                        # 客户端主动结束，返回最终结果
+                        final = transcriber.finish()
+                        if final:
+                            await websocket.send_text(json.dumps({
+                                "type": "stt_result",
+                                "text": final["text"],
+                                "is_final": True,
+                                "confidence": final["confidence"],
+                                "duration_ms": final["duration_ms"],
+                            }))
+                        await websocket.send_text(json.dumps({
+                            "type": "stt_end",
+                        }))
+                        logger.info(f"[STT-WS:{conn_id}] session ended by client")
+
+                    elif msg_type == "cancel":
+                        transcriber._reset()
+                        logger.info(f"[STT-WS:{conn_id}] cancelled")
+
+    except WebSocketDisconnect:
+        logger.info(f"[STT-WS:{conn_id}] disconnected")
+    except Exception as e:
+        logger.error(f"[STT-WS:{conn_id}] error: {e}")
+    finally:
+        logger.info(f"[STT-WS:{conn_id}] cleaned up")
 
 
 @app.get("/api/config")
@@ -391,26 +481,62 @@ def _split_sentences(text: str) -> list:
     return sentences[:10]  # 最多 10 句，避免过多请求
 
 
+# Track TTS cancel requests per connection
+_tts_cancel_flags: dict[int, bool] = {}
+
+
 async def _send_tts_chunks(ws, conn_id: int, text: str, voice_id: str):
-    """分句并行合成语音，按顺序通过 WebSocket 推送音频块。"""
+    """逐句合成语音，首句完成即推送，前2句预合成并行。"""
     sentences = _split_sentences(text)
     if not sentences:
         return
 
-    logger.info(f"[WS:{conn_id}] TTS: {len(sentences)} sentences, voice={voice_id}")
+    total = len(sentences)
+    logger.info(f"[WS:{conn_id}] TTS: {total} sentences, voice={voice_id}")
     t0 = time.time()
 
-    # 并行合成所有句子
-    tasks = [
-        synthesize_speech(s, voice_id=voice_id)
-        for s in sentences
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # 重置取消标志
+    _tts_cancel_flags[conn_id] = False
 
-    # 按顺序推送音频块
-    for i, (sentence, audio) in enumerate(zip(sentences, results)):
-        if isinstance(audio, Exception):
+    # Phase 1: 前2句并行预合成
+    first_batch = sentences[:2]
+    first_tasks = [
+        synthesize_speech(s, voice_id=voice_id)
+        for s in first_batch
+    ]
+    first_results = await asyncio.gather(*first_tasks, return_exceptions=True)
+
+    # 逐句推送前2句
+    for i, (sentence, audio) in enumerate(zip(first_batch, first_results)):
+        if _tts_cancel_flags.get(conn_id):
+            logger.info(f"[WS:{conn_id}] TTS cancelled at chunk {i}")
+            return
+        if isinstance(audio, Exception) or not audio:
             logger.warning(f"[WS:{conn_id}] TTS chunk {i} failed: {audio}")
+            continue
+        try:
+            await ws.send_text(json.dumps({
+                "type": "audio",
+                "index": i,
+                "total": total,
+                "text": sentence[:50],
+                "data": base64.b64encode(audio).decode("ascii"),
+            }))
+            elapsed = time.time() - t0
+            logger.info(f"[WS:{conn_id}] TTS chunk {i}/{total} sent in {elapsed:.2f}s")
+        except Exception:
+            return
+
+    # Phase 2: 剩余句子逐句合成并推送
+    for i in range(2, total):
+        if _tts_cancel_flags.get(conn_id):
+            logger.info(f"[WS:{conn_id}] TTS cancelled at chunk {i}")
+            return
+        sentence = sentences[i]
+        try:
+            audio = await synthesize_speech(sentence, voice_id=voice_id)
+        except Exception as e:
+            logger.warning(f"[WS:{conn_id}] TTS chunk {i} failed: {e}")
             continue
         if not audio:
             continue
@@ -418,15 +544,24 @@ async def _send_tts_chunks(ws, conn_id: int, text: str, voice_id: str):
             await ws.send_text(json.dumps({
                 "type": "audio",
                 "index": i,
-                "total": len(sentences),
+                "total": total,
                 "text": sentence[:50],
                 "data": base64.b64encode(audio).decode("ascii"),
             }))
+            elapsed = time.time() - t0
+            logger.info(f"[WS:{conn_id}] TTS chunk {i}/{total} sent in {elapsed:.2f}s")
         except Exception:
-            break
+            return
+
+    # 发送结束标记
+    try:
+        await ws.send_text(json.dumps({"type": "audio_end", "total": total}))
+    except Exception:
+        pass
 
     elapsed = time.time() - t0
-    logger.info(f"[WS:{conn_id}] TTS done: {len(sentences)} chunks in {elapsed:.2f}s")
+    logger.info(f"[WS:{conn_id}] TTS done: {total} chunks in {elapsed:.2f}s")
+    _tts_cancel_flags.pop(conn_id, None)
 
 
 @app.websocket("/ws")
@@ -495,6 +630,19 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "reply",
                         "text": error_msg,
                     }))
+
+            elif msg_type == "audio_cancel":
+                _tts_cancel_flags[conn_id] = True
+                logger.info(f"[WS:{conn_id}] TTS cancel requested")
+
+            elif msg_type == "audio_cancel":
+                # 客户端请求取消后续 TTS 合成
+                _tts_cancel_flags[conn_id] = True
+                logger.info(f"[WS:{conn_id}] TTS cancel requested")
+
+            elif msg_type == "audio_cancel":
+                _tts_cancel_flags[conn_id] = True
+                logger.info(f"[WS:{conn_id}] TTS cancel requested")
 
             elif msg_type == "clear":
                 ai_service.clear_history()
