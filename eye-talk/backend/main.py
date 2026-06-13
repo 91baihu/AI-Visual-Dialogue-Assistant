@@ -9,12 +9,12 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from ai_service import ChatService, PROVIDER_CONFIG, get_api_key_env_name
-from tts_service import synthesize_speech, get_voice_list
+from tts_service import synthesize_speech, synthesize_speech_stream, get_voice_list
 
 load_dotenv()
 
@@ -202,7 +202,7 @@ class TTSRequest(BaseModel):
 
 @app.post("/api/tts")
 async def tts_synthesize(req: TTSRequest):
-    """Synthesize speech from text and return MP3 audio (Edge TTS, no API key needed)."""
+    """Synthesize speech and return complete MP3 (for preview/test)."""
     audio = await synthesize_speech(
         text=req.text,
         voice_id=req.voice_id,
@@ -213,6 +213,26 @@ async def tts_synthesize(req: TTSRequest):
     if not audio:
         raise HTTPException(status_code=500, detail="语音合成失败")
     return Response(content=audio, media_type="audio/mpeg")
+
+
+@app.post("/api/tts/stream")
+async def tts_stream(req: TTSRequest):
+    """Stream synthesized speech: audio chunks pushed as they are generated (low latency)."""
+    async def audio_generator():
+        async for chunk in synthesize_speech_stream(
+            text=req.text,
+            voice_id=req.voice_id,
+            speed_ratio=req.speed_ratio or 1.0,
+            volume_ratio=req.volume_ratio or 1.0,
+            pitch_ratio=req.pitch_ratio or 1.0,
+        ):
+            yield chunk
+
+    return StreamingResponse(
+        audio_generator(),
+        media_type="audio/mpeg",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @app.get("/api/config")
