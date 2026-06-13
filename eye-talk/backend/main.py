@@ -137,8 +137,8 @@ def merge_stats(token_usage):
 
 @app.get("/")
 async def root():
-    """Redirect to frontend app"""
-    return RedirectResponse(url="/app/")
+    """Redirect to landing page"""
+    return RedirectResponse(url="/app/landing.html")
 
 
 @app.get("/app")
