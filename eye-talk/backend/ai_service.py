@@ -12,22 +12,93 @@ SYSTEM_PROMPT = (
     "如果图片中有文字请帮忙识别。"
 )
 
-VISION_MODEL = "deepseek-v4-pro"
-TEXT_MODEL = "deepseek-chat"
-
 MAX_HISTORY = 20
 
-# DeepSeek pricing (CNY per million tokens)
-PRICE_INPUT = 1.0
-PRICE_OUTPUT = 2.0
+# Provider configurations
+PROVIDER_CONFIG = {
+    "deepseek": {
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+        "vision_model": "deepseek-v4-pro",
+        "chat_model": "deepseek-chat",
+        "input_price": 1.0,       # CNY per million tokens
+        "output_price": 2.0,
+        "max_tokens": 1024,
+        "timeout": 30,
+        "supports_vision": True,
+        "default_temperature": 1.0,
+    },
+    "qwen": {
+        "name": "通义千问",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "vision_model": "qwen-vl-max",
+        "chat_model": "qwen-turbo",
+        "input_price": 0.3,
+        "output_price": 0.6,
+        "max_tokens": 1024,
+        "timeout": 30,
+        "supports_vision": True,
+        "default_temperature": 1.0,
+    },
+    "zhipu": {
+        "name": "智谱AI",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "vision_model": "glm-4v",
+        "chat_model": "glm-4-flash",
+        "input_price": 0.1,
+        "output_price": 0.1,
+        "max_tokens": 1024,
+        "timeout": 30,
+        "supports_vision": True,
+        "default_temperature": 0.7,
+    },
+    "kimi": {
+        "name": "Kimi",
+        "base_url": "https://api.moonshot.cn/v1",
+        "vision_model": "moonshot-v1-8k-vision",
+        "chat_model": "moonshot-v1-8k",
+        "input_price": 12.0,
+        "output_price": 12.0,
+        "max_tokens": 1024,
+        "timeout": 30,
+        "supports_vision": True,
+        "default_temperature": 0.7,
+    },
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "vision_model": "gpt-4o",
+        "chat_model": "gpt-4o-mini",
+        "input_price": 0.15,      # USD per million tokens
+        "output_price": 0.60,
+        "max_tokens": 4096,
+        "timeout": 60,
+        "supports_vision": True,
+        "default_temperature": 1.0,
+    },
+}
+
+
+def get_api_key_env_name(provider: str) -> str:
+    """Return the environment variable name for a provider's API key."""
+    env_map = {
+        "deepseek": "DEEPSEEK_API_KEY",
+        "qwen": "DASHSCOPE_API_KEY",
+        "zhipu": "ZHIPU_API_KEY",
+        "kimi": "KIMI_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }
+    return env_map.get(provider, f"{provider.upper()}_API_KEY")
 
 
 class TokenUsage:
     """Token usage accumulator"""
-    def __init__(self):
+    def __init__(self, input_price: float = 1.0, output_price: float = 2.0):
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.total_calls = 0
+        self.input_price = input_price
+        self.output_price = output_price
 
     def add(self, prompt_tokens, completion_tokens):
         self.prompt_tokens += prompt_tokens
@@ -36,8 +107,8 @@ class TokenUsage:
 
     def to_dict(self):
         total = self.prompt_tokens + self.completion_tokens
-        cost = (self.prompt_tokens / 1_000_000 * PRICE_INPUT +
-                self.completion_tokens / 1_000_000 * PRICE_OUTPUT)
+        cost = (self.prompt_tokens / 1_000_000 * self.input_price +
+                self.completion_tokens / 1_000_000 * self.output_price)
         return {
             "total_calls": self.total_calls,
             "prompt_tokens": self.prompt_tokens,
@@ -48,23 +119,57 @@ class TokenUsage:
 
 
 class ChatService:
-    """DeepSeek API wrapper with token tracking"""
+    """Multi-provider AI API wrapper with token tracking"""
 
     def __init__(self):
+        # Resolve provider from environment (default: deepseek)
+        provider = os.getenv("AI_PROVIDER", "deepseek").lower()
+        if provider not in PROVIDER_CONFIG:
+            logger.warning(f"Unknown provider '{provider}', falling back to deepseek")
+            provider = "deepseek"
+
+        config = PROVIDER_CONFIG[provider]
+        self.provider = provider
+        self.provider_name = config["name"]
+        self.vision_model = config["vision_model"]
+        self.chat_model = config["chat_model"]
+        self.input_price = config["input_price"]
+        self.output_price = config["output_price"]
+        self.max_tokens = config["max_tokens"]
+        self.timeout = config["timeout"]
+        self.supports_vision = config["supports_vision"]
+        self.default_temperature = config["default_temperature"]
+
+        # Resolve API key
+        env_key_name = get_api_key_env_name(provider)
+        api_key = os.getenv(env_key_name, "")
+
+        # Create OpenAI-compatible client (use placeholder if key is empty
+        # so the client can be created; API calls will fail until a real key is set)
         self.client = OpenAI(
-            api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-            base_url="https://api.deepseek.com",
+            api_key=api_key or "not-set",
+            base_url=config["base_url"],
         )
+
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         self._vision_supported = None
-        self.tokens = TokenUsage()
-        logger.info("ChatService initialized")
+        self.tokens = TokenUsage(self.input_price, self.output_price)
+
+        logger.info(
+            f"ChatService initialized: provider={self.provider_name} "
+            f"chat={self.chat_model} vision={self.vision_model} "
+            f"key={'set' if api_key else 'MISSING'} ({env_key_name})"
+        )
 
     def _trim_history(self):
         if len(self.messages) > MAX_HISTORY + 1:
             self.messages = [self.messages[0]] + self.messages[-(MAX_HISTORY):]
 
-    def _call_api(self, model, messages, max_tokens=1024, timeout=30):
+    def _call_api(self, model, messages, max_tokens=None, timeout=None):
+        if max_tokens is None:
+            max_tokens = self.max_tokens
+        if timeout is None:
+            timeout = self.timeout
         return self.client.chat.completions.create(
             model=model,
             messages=messages,
@@ -84,7 +189,7 @@ class ChatService:
 
         start = time.time()
         try:
-            resp = self._call_api(TEXT_MODEL, self.messages)
+            resp = self._call_api(self.chat_model, self.messages)
             reply = resp.choices[0].message.content
             self._track_usage(resp)
             elapsed = time.time() - start
@@ -119,7 +224,7 @@ class ChatService:
 
         start = time.time()
         try:
-            resp = self._call_api(VISION_MODEL, self.messages)
+            resp = self._call_api(self.vision_model, self.messages)
             reply = resp.choices[0].message.content
             self._track_usage(resp)
             elapsed = time.time() - start
@@ -134,8 +239,24 @@ class ChatService:
             elapsed = time.time() - start
             err_str = str(e).lower()
 
-            if "unknown variant" in err_str or "image_url" in err_str:
-                logger.warning(f"[chat_with_image] vision not supported, falling back ({elapsed:.2f}s)")
+            # Detect vision-capability failures across providers:
+            #   - "unknown variant" / "image_url" : provider doesn't accept image_url content type
+            #   - "not supported" / "not support"  : model doesn't support vision
+            #   - 404 / "model_not_found"           : vision model doesn't exist
+            #   - "invalid_request" + "image"       : provider rejects image content
+            vision_fail = any(kw in err_str for kw in (
+                "unknown variant", "image_url",
+                "not supported", "not support",
+                "model_not_found", "model not found",
+                "404", "does not exist",
+                "invalid_request", "invalid model",
+            ))
+
+            if vision_fail:
+                logger.warning(
+                    f"[chat_with_image] vision not supported for {self.provider}/{self.vision_model}, "
+                    f"falling back to text-only ({elapsed:.2f}s): {str(e)[:100]}"
+                )
                 self._vision_supported = False
                 self.messages.pop()
                 return self._chat_image_fallback(text, image_base64)
@@ -155,7 +276,7 @@ class ChatService:
 
         start = time.time()
         try:
-            resp = self._call_api(TEXT_MODEL, self.messages)
+            resp = self._call_api(self.chat_model, self.messages)
             reply = resp.choices[0].message.content
             self._track_usage(resp)
             elapsed = time.time() - start
@@ -174,3 +295,51 @@ class ChatService:
     def clear_history(self):
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         logger.info("History cleared")
+
+    def get_provider_info(self) -> dict:
+        """Return current provider details and usage stats."""
+        return {
+            "provider": self.provider,
+            "provider_name": self.provider_name,
+            "chat_model": self.chat_model,
+            "vision_model": self.vision_model,
+            "supports_vision": self.supports_vision,
+            "max_tokens": self.max_tokens,
+            "timeout": self.timeout,
+            "input_price": self.input_price,
+            "output_price": self.output_price,
+            "tokens": self.tokens.to_dict(),
+        }
+
+    def test_connection(self) -> dict:
+        """Send a minimal chat request to verify API connectivity."""
+        env_key_name = get_api_key_env_name(self.provider)
+        api_key = os.getenv(env_key_name, "")
+        if not api_key:
+            return {
+                "ok": False,
+                "error": f"API key not set: {env_key_name}",
+                "provider": self.provider_name,
+            }
+
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=5,
+                timeout=10,
+            )
+            reply = resp.choices[0].message.content or ""
+            return {
+                "ok": True,
+                "provider": self.provider_name,
+                "model": self.chat_model,
+                "reply_preview": reply[:50],
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "provider": self.provider_name,
+                "model": self.chat_model,
+                "error": str(e),
+            }
