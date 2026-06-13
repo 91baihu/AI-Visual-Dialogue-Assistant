@@ -100,13 +100,13 @@ PROVIDER_CONFIG = {
     "deepseek": {
         "name": "DeepSeek",
         "base_url": "https://api.deepseek.com",
-        "vision_model": "deepseek-v4-pro",
+        "vision_model": "deepseek-chat",  # DeepSeek API 不支持图片输入，降级为纯文本
         "chat_model": "deepseek-chat",
         "input_price": 1.0,       # CNY per million tokens
         "output_price": 2.0,
         "max_tokens": 1024,
         "timeout": 30,
-        "supports_vision": True,
+        "supports_vision": False,  # DeepSeek API 不支持图片输入
         "default_temperature": 1.0,
     },
     "qwen": {

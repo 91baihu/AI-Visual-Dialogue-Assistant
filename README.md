@@ -33,13 +33,13 @@ EyeTalk 支持以下 AI 提供商，可通过前端设置面板一键切换：
 
 | 提供商 | 聊天模型 | 视觉模型 | 特点 |
 |--------|----------|----------|------|
-| DeepSeek | deepseek-chat | deepseek-v4-pro | 国产高性价比，响应速度快 |
-| 通义千问 | qwen-turbo | qwen-vl-max | 阿里云出品，多模态能力强 |
+| DeepSeek | deepseek-chat | 不支持 | 国产高性价比，响应速度快（仅文字对话） |
+| 通义千问 | qwen-turbo | qwen-vl-max | 阿里云出品，多模态能力强，推荐用于图像识别 |
 | 智谱 GLM | glm-4-flash | glm-4v | 清华系模型，中文理解优秀 |
 | Kimi | moonshot-v1-8k | moonshot-v1-8k-vision | 长文本处理见长，支持多模态 |
 | OpenAI | gpt-4o-mini | gpt-4o | 全球领先的多模态模型 |
 
-所有提供商均通过 OpenAI 兼容 API 格式接入，使用 `openai` Python SDK 配合不同 `base_url`。当视觉模型不可用时，自动降级为纯文本模式。
+所有提供商均通过 OpenAI 兼容 API 格式接入，使用 `openai` Python SDK 配合不同 `base_url`。DeepSeek API 不支持图片输入，使用时会自动降级为纯文本模式；如需图像识别功能，请使用通义千问、智谱、Kimi 或 OpenAI。
 
 ### 切换方式
 
