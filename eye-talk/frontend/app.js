@@ -7,6 +7,7 @@ const AI_TIMEOUT = 60000;
 const RECONNECT_INTERVAL = 3000;
 const AUTO_SAMPLE_INTERVAL = 2000;
 const FRAME_DIFF_THRESHOLD = 15;
+const WS_PING_INTERVAL = 25000;   // 心跳间隔 25s，防止代理/网关超时断连
 const COST_WARN_THRESHOLD = 5.0;
 
 // Quick command presets
@@ -67,6 +68,7 @@ let autoSampleTimer = null;
 let prevFrameData = null;
 let isAutoSending = false;
 let lastAIReply = ""; // for screenshot feature
+let pingTimer = null;    // WebSocket 心跳定时器
 let _hasUserInteracted = false; // TTS 需要用户先交互
 
 // 监听用户首次交互，解锁 TTS
@@ -246,7 +248,7 @@ function removeThinking() {
 btnStartCam.addEventListener("click", async () => {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
       audio: false,
     });
     videoEl.srcObject = cameraStream;
@@ -291,8 +293,8 @@ function stopCamera() {
 // ==================== Frame Capture & Diff ====================
 function captureFrame() {
   if (!cameraStream) return { base64: null, imageData: null };
-  // 缩放到更小尺寸以加速 API 识别
-  const MAX_W = 480, MAX_H = 360;
+  // 缩放到适中尺寸：清晰度与传输速度的平衡点
+  const MAX_W = 960, MAX_H = 720;
   let w = videoEl.videoWidth, h = videoEl.videoHeight;
   if (w > MAX_W || h > MAX_H) {
     const scale = Math.min(MAX_W / w, MAX_H / h);
@@ -304,7 +306,7 @@ function captureFrame() {
   const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(videoEl, 0, 0, w, h);
   const imageData = ctx.getImageData(0, 0, w, h);
-  const base64 = canvasEl.toDataURL("image/jpeg", 0.6);
+  const base64 = canvasEl.toDataURL("image/jpeg", 0.85);
   return { base64, imageData };
 }
 
@@ -375,6 +377,8 @@ function autoSampleTick() {
   autoStatus.classList.add("change");
   autoStatusText.textContent = "检测到变化";
   isAutoSending = true;
+  // 安全超时：防止响应丢失导致 isAutoSending 永久卡住
+  setTimeout(() => { isAutoSending = false; }, 65000);
   if (ws && ws.readyState === WebSocket.OPEN) {
     showThinking();
     ws.send(JSON.stringify({ type: "chat", text: "请描述当前画面的变化", image: base64 }));
@@ -384,6 +388,19 @@ function autoSampleTick() {
 }
 
 // ==================== WebSocket ====================
+function _startPing() {
+  _stopPing();
+  pingTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "ping" })); } catch {}
+    }
+  }, WS_PING_INTERVAL);
+}
+
+function _stopPing() {
+  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+}
+
 function connectWS() {
   if (ws) {
     shouldReconnect = false;
@@ -391,6 +408,7 @@ function connectWS() {
     ws = null;
   }
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  _stopPing();
 
   shouldReconnect = true;
   wsStatusEl.textContent = "🟡 连接中...";
@@ -402,6 +420,7 @@ function connectWS() {
   ws.onopen = () => {
     wsStatusEl.textContent = "🟢 已连接";
     wsStatusEl.classList.add("connected");
+    _startPing();
     const sysMsgs = messagesDiv.querySelectorAll(".msg-system .bubble-system");
     sysMsgs.forEach((el) => {
       if (el.textContent.includes("服务未启动") || el.textContent.includes("连接已断开")) {
@@ -411,11 +430,22 @@ function connectWS() {
   };
 
   ws.onmessage = (event) => {
-    isAutoSending = false;
     try {
       const data = JSON.parse(event.data);
 
+      // 处理 provider_changed 通知 — 不影响思考状态
+      if (data.type === "provider_changed") {
+        addMessage("system", `🔄 已切换到 ${data.provider_name || data.provider}（${data.chat_model}）`);
+        removeThinking();
+        isAutoSending = false;
+        return;
+      }
+
+      // 心跳 pong — 静默忽略
+      if (data.type === "pong") return;
+
       if (data.type === "reply") {
+        isAutoSending = false;
         removeThinking();
         const wrapper = addMessage("ai", data.text);
         lastAIReply = data.text;
@@ -425,16 +455,19 @@ function connectWS() {
         speakText(data.text, speakBtn);
 
       } else {
+        isAutoSending = false;
         removeThinking();
         addMessage("ai", data.text || event.data);
       }
     } catch {
+      isAutoSending = false;
       removeThinking();
       addMessage("ai", event.data);
     }
   };
 
   ws.onclose = () => {
+    _stopPing();
     wsStatusEl.textContent = "🔴 已断开";
     wsStatusEl.classList.remove("connected");
     isAutoSending = false;
@@ -1300,14 +1333,10 @@ async function saveConfig() {
     const data = await resp.json();
 
     if (data.success) {
-      configStatus.textContent = "✓ 配置已保存，正在测试连接...";
+      configStatus.textContent = "✓ 配置已保存";
       configStatus.className = "ok";
       apiKeyInput.value = "";
       localStorage.setItem("eyeTalk_provider", provider);
-
-      // Reconnect WebSocket to use new provider
-      if (ws) ws.close();
-      connectWS();
 
       showToast("配置已保存，已切换到 " + provider, "ok");
       setTimeout(closeSettings, 1200);
