@@ -6,9 +6,13 @@
 
 EyeTalk 是一款基于多模态AI的实时视觉对话助手。用户打开摄像头后，AI 能够实时"看到"摄像头画面，并给予自然流畅的回应。支持文字对话、语音输入、快捷指令、自动观察等功能。
 
+## 演示视频
+
+👉 [B 站演示视频](https://www.bilibili.com/video/BV1FqJP6AEfU/?share_source=copy_web&vd_source=ed219f89859a23299cbd1b2da831fe34)
+
 ## 核心特性
 
-- **实时视觉理解** — AI 能识别摄像头中的物体、场景、文字，图片压缩至 480×360 加速识别
+- **实时视觉理解** — AI 能识别摄像头中的物体、场景、文字，图片压缩至 960×720 兼顾清晰度与速度
 - **语音交互** — 按住说话，支持 DashScope Recognition 本地文件识别 + FunASR 离线识别 + Web Speech API 多级降级
 - **多轮对话** — AI 记住上下文，支持连续对话（最多 20 轮）
 - **智能帧采样** — MSE 差异检测，静止画面不重复调用 API
@@ -187,12 +191,14 @@ OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 ```json
 {"type": "chat", "text": "用户说的话", "image": "data:image/jpeg;base64,..."}
 {"type": "clear"}
+{"type": "ping"}
 ```
 
 **接收：**
 ```json
 {"type": "reply", "text": "AI回复", "usage": {"total_calls": 1, "total_tokens": 74, "estimated_cost": 0.0001}}
 {"type": "provider_changed", "provider": "qwen", "provider_name": "通义千问"}
+{"type": "pong"}
 ```
 
 ### WebSocket `/ws/stt` — 流式语音识别
@@ -236,10 +242,11 @@ OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 
 ## 性能优化
 
-- **图片压缩** — 摄像头帧自动缩放至 480×360，JPEG 质量 0.6，减少约 50% API 传输量
+- **图片压缩** — 摄像头帧自动缩放至 960×720，JPEG 质量 0.85，兼顾清晰度与传输效率
 - **异步非阻塞** — AI 调用通过 `run_in_executor` 在线程池执行，不阻塞 WebSocket 事件循环
-- **超时保护** — 视觉识别 20s 硬超时，文字对话 30s 硬超时，超时后返回友好提示
+- **超时保护** — 视觉识别 / 文字对话均 60s 硬超时，超时后返回友好提示
 - **智能帧采样** — MSE 差异检测，静止画面不重复调用 API，节省 Token 消耗
+- **心跳保活** — WebSocket 每 25 秒 ping/pong，防止代理/网关超时断连
 
 ## 运行测试
 
