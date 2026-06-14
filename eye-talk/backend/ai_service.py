@@ -117,7 +117,7 @@ PROVIDER_CONFIG = {
         "input_price": 0.3,
         "output_price": 0.6,
         "max_tokens": 512,
-        "timeout": 15,
+        "timeout": 60,
         "supports_vision": True,
         "default_temperature": 1.0,
     },
