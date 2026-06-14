@@ -52,6 +52,7 @@ const sttStatusText    = document.getElementById("sttStatusText");
 const sttConfidence    = document.getElementById("sttConfidence");
 const sttMeterBar      = document.getElementById("sttMeterBar");
 const sttInterim       = document.getElementById("sttInterim");
+const sttEngineTag     = document.getElementById("sttEngineTag");
 
 // ==================== State ====================
 let ws = null;
@@ -66,6 +67,12 @@ let autoSampleTimer = null;
 let prevFrameData = null;
 let isAutoSending = false;
 let lastAIReply = ""; // for screenshot feature
+let _hasUserInteracted = false; // TTS 需要用户先交互
+
+// 监听用户首次交互，解锁 TTS
+["click", "keydown", "touchstart"].forEach(evt => {
+  document.addEventListener(evt, () => { _hasUserInteracted = true; }, { once: true });
+});
 
 // ==================== STT Panel State ====================
 let sttPanelTimer = null;       // auto-hide timer
@@ -92,6 +99,11 @@ let currentSpeakBtn = null;
 
 function speakText(text, btnEl) {
   if (!window.speechSynthesis) return;
+  // 浏览器要求用户先交互才能播放语音
+  if (!_hasUserInteracted) {
+    console.log("[TTS] Waiting for user interaction before speaking");
+    return;
+  }
   // 停止当前朗读
   window.speechSynthesis.cancel();
 
@@ -279,12 +291,20 @@ function stopCamera() {
 // ==================== Frame Capture & Diff ====================
 function captureFrame() {
   if (!cameraStream) return { base64: null, imageData: null };
-  canvasEl.width = videoEl.videoWidth;
-  canvasEl.height = videoEl.videoHeight;
+  // 缩放到更小尺寸以加速 API 识别
+  const MAX_W = 480, MAX_H = 360;
+  let w = videoEl.videoWidth, h = videoEl.videoHeight;
+  if (w > MAX_W || h > MAX_H) {
+    const scale = Math.min(MAX_W / w, MAX_H / h);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+  }
+  canvasEl.width = w;
+  canvasEl.height = h;
   const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(videoEl, 0, 0);
-  const imageData = ctx.getImageData(0, 0, canvasEl.width, canvasEl.height);
-  const base64 = canvasEl.toDataURL("image/jpeg", 0.8);
+  ctx.drawImage(videoEl, 0, 0, w, h);
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const base64 = canvasEl.toDataURL("image/jpeg", 0.6);
   return { base64, imageData };
 }
 
@@ -569,12 +589,14 @@ function updateStats(usage) {
 
 async function fetchStats() {
   try {
-    const resp = await fetch("http://localhost:8000/api/stats");
+    const resp = await fetch("/api/stats");
     if (resp.ok) updateStats(await resp.json());
-  } catch {}
+  } catch (e) {
+    console.warn("[Stats] fetch failed:", e);
+  }
 }
 
-setInterval(fetchStats, 5000);
+setInterval(fetchStats, 3000);
 fetchStats();
 
 // ==================== Speech Recognition ====================
@@ -598,12 +620,21 @@ function initSpeechRecognition() {
     if (ok) {
       console.log("[STT] Using backend WebSocket mode");
       sttFallbackMode = false;
+      _setSttEngineTag("backend", "DashScope 实时");
     } else {
       console.log("[STT] Backend unavailable, using Web Speech API fallback");
       sttFallbackMode = true;
+      _setSttEngineTag("fallback", "Web Speech");
       _initWebSpeechFallback();
     }
   });
+}
+
+/** 更新 STT 引擎标签 */
+function _setSttEngineTag(cls, text) {
+  if (!sttEngineTag) return;
+  sttEngineTag.className = "stt-engine-tag " + cls;
+  sttEngineTag.textContent = text;
 }
 
 /** 测试后端 STT 是否可用 */
@@ -661,9 +692,10 @@ async function _startBackendStt() {
 
     sttWs.onerror = (e) => {
       console.warn("[STT-WS] Error:", e);
-      setSttStatus("error", "连接错误");
+      setSttStatus("error", "连接错误，已切换到浏览器识别");
       // 降级到 Web Speech API
       sttFallbackMode = true;
+      _setSttEngineTag("fallback", "Web Speech");
       _initWebSpeechFallback();
     };
 
@@ -674,9 +706,40 @@ async function _startBackendStt() {
   });
 }
 
+/** STT 重试状态 */
+let _sttRetryCount = 0;
+const _STT_MAX_RETRY = 1;
+
 /** 处理后端返回的识别结果 */
 function _handleSttResult(data) {
+  // 识别失败：显示错误，首次自动重试
+  if (data.is_final && data.success === false) {
+    const errMsg = data.error || "识别失败";
+    console.warn("[STT] Recognition failed:", errMsg);
+    setSttStatus("error", errMsg);
+
+    if (_sttRetryCount < _STT_MAX_RETRY) {
+      _sttRetryCount++;
+      setSttStatus("recognizing", `识别失败，${1}秒后重试...`);
+      setTimeout(() => {
+        if (sttWs && sttWs.readyState === WebSocket.OPEN) {
+          setSttStatus("recognizing", "重试中...");
+          // 发送 end 信号触发服务端最终识别
+          sttWs.send(JSON.stringify({ type: "end" }));
+        }
+      }, 1000);
+    } else {
+      // 重试耗尽，显示最终错误
+      setSttStatus("error", "识别失败: " + errMsg);
+      hideSttPanel(3000);
+      _sttRetryCount = 0;
+    }
+    return;
+  }
+
+  // 识别成功
   if (data.text) {
+    _sttRetryCount = 0;  // 重置重试计数
     if (data.is_final) {
       // 最终结果
       textInput.value = (textInput.value + data.text).trim();
@@ -1137,10 +1200,13 @@ settingsModal.addEventListener("click", (e) => {
 });
 
 // Toggle password visibility
+const _SVG_EYE = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const _SVG_EYE_OFF = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
 toggleKeyBtn.addEventListener("click", () => {
   const isPassword = apiKeyInput.type === "password";
   apiKeyInput.type = isPassword ? "text" : "password";
-  toggleKeyBtn.textContent = isPassword ? "🙈" : "👁️";
+  toggleKeyBtn.innerHTML = isPassword ? _SVG_EYE_OFF : _SVG_EYE;
 });
 
 async function loadConfig() {

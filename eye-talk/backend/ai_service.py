@@ -116,8 +116,8 @@ PROVIDER_CONFIG = {
         "chat_model": "qwen-turbo",
         "input_price": 0.3,
         "output_price": 0.6,
-        "max_tokens": 1024,
-        "timeout": 30,
+        "max_tokens": 512,
+        "timeout": 15,
         "supports_vision": True,
         "default_temperature": 1.0,
     },
@@ -258,11 +258,20 @@ class ChatService:
             timeout=timeout,
         )
 
-    def _track_usage(self, resp):
-        """Extract and accumulate token usage from API response"""
-        if resp.usage:
-            self.tokens.add(resp.usage.prompt_tokens, resp.usage.completion_tokens)
-            logger.debug(f"[tokens] +{resp.usage.prompt_tokens}+{resp.usage.completion_tokens} = {self.tokens.to_dict()['total_tokens']}")
+    def _track_usage(self, resp, msg_count: int = 0):
+        """Extract and accumulate token usage from API response.
+        Always increments call count; uses response usage if available,
+        otherwise estimates from message count.
+        """
+        if resp.usage and resp.usage.prompt_tokens:
+            prompt = resp.usage.prompt_tokens
+            completion = resp.usage.completion_tokens
+        else:
+            # API 未返回 usage 时，用消息长度估算
+            prompt = msg_count * 50 + 200  # 粗略估算
+            completion = 100
+        self.tokens.add(prompt, completion)
+        logger.debug(f"[tokens] +{prompt}+{completion} = {self.tokens.to_dict()['total_tokens']}")
 
     def chat(self, text: str, history: Optional[list] = None) -> str:
         self.messages.append({"role": "user", "content": text})
@@ -273,7 +282,7 @@ class ChatService:
             resp = self._call_api(self.chat_model, self.messages)
             reply = resp.choices[0].message.content
             reply = _clean_reply(reply)
-            self._track_usage(resp)
+            self._track_usage(resp, len(self.messages))
             elapsed = time.time() - start
             logger.info(f"[chat] text={text[:50]}... -> {len(reply)} chars, {elapsed:.2f}s")
 
@@ -309,7 +318,7 @@ class ChatService:
             resp = self._call_api(self.vision_model, self.messages)
             reply = resp.choices[0].message.content
             reply = _clean_reply(reply)
-            self._track_usage(resp)
+            self._track_usage(resp, len(self.messages))
             elapsed = time.time() - start
             logger.info(f"[chat_with_image] OK {elapsed:.2f}s -> {len(reply)} chars")
 
@@ -362,7 +371,7 @@ class ChatService:
             resp = self._call_api(self.chat_model, self.messages)
             reply = resp.choices[0].message.content
             reply = _clean_reply(reply)
-            self._track_usage(resp)
+            self._track_usage(resp, len(self.messages))
             elapsed = time.time() - start
             logger.info(f"[chat_image_fallback] {elapsed:.2f}s -> {len(reply)} chars")
 

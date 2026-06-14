@@ -3,7 +3,8 @@ Speech-to-Text Service
 支持两种模式：
   1. 批量转写（transcribe_audio）— 接收完整音频文件
   2. 流式转写（StreamTranscriber）— 接收 PCM 实时音频流，带 VAD
-优先：DashScope Paraformer → 降级：Google 免费 API
+
+识别优先级：DashScope Paraformer 实时识别 → FunASR 本地 → Google 免费 API
 """
 
 import os
@@ -131,6 +132,10 @@ class StreamTranscriber:
             return self._do_recognize()
         return None
 
+    def cancel(self):
+        """取消当前转写，清空缓冲区。"""
+        self._reset()
+
     def _reset(self):
         """重置状态。"""
         self._pcm_buffer.clear()
@@ -164,17 +169,23 @@ class StreamTranscriber:
 def transcribe_audio_sync(audio_bytes: bytes) -> dict:
     """
     同步转写 WAV 音频为文字。
-    优先 DashScope Paraformer → 降级 Google 免费 API。
+    优先级：DashScope 实时识别 → FunASR 本地 → Google 免费 API。
     """
-    # 1. 尝试 DashScope
+    # 1. 尝试 DashScope 实时识别
     dash_key = os.getenv("DASHSCOPE_API_KEY", "")
     if dash_key and dash_key != "your_key_here":
-        result = _dashscope_transcribe(audio_bytes, dash_key)
+        result = _dashscope_realtime_transcribe(audio_bytes, dash_key)
         if result["success"]:
             return result
         logger.warning(f"[STT] DashScope failed: {result['error']}")
 
-    # 2. 降级 Google
+    # 2. 尝试 FunASR 本地识别
+    result = _funasr_transcribe(audio_bytes)
+    if result["success"]:
+        return result
+    logger.warning(f"[STT] FunASR failed: {result['error']}")
+
+    # 3. 降级 Google
     return _google_transcribe(audio_bytes)
 
 
@@ -183,56 +194,116 @@ async def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> 
     return transcribe_audio_sync(audio_bytes)
 
 
-def _dashscope_transcribe(audio_bytes: bytes, api_key: str) -> dict:
-    """DashScope Paraformer-v2 语音识别。"""
+def _dashscope_realtime_transcribe(audio_bytes: bytes, api_key: str) -> dict:
+    """
+    DashScope Paraformer-realtime-v2 语音识别。
+    使用 Recognition.call(file) 同步识别本地 WAV 文件。
+    """
     try:
         import dashscope
-        from dashscope.audio.asr import Transcription
+        from dashscope.audio.asr import Recognition
 
         dashscope.api_key = api_key
 
+        # 写入临时 WAV 文件（Recognition.call 需要文件路径）
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(audio_bytes)
             tmp_path = f.name
 
         try:
-            response = Transcription.async_call(
-                model="paraformer-v2",
-                file_urls=[f"file://{tmp_path}"],
-                language_hints=["zh"],
+            rec = Recognition(
+                model='paraformer-realtime-v2',
+                callback=None,
+                format='wav',
+                sample_rate=SAMPLE_RATE,
             )
-            result = Transcription.wait(response.output.task_id)
 
-            if result.output.task_status == "SUCCEEDED":
-                results = result.output.results
-                if results and results[0].transcription_url:
-                    import httpx
-                    resp = httpx.get(results[0].transcription_url, timeout=10)
-                    transcripts = resp.json().get("transcripts", [])
-                    if transcripts:
-                        text = transcripts[0].get("text", "").strip()
-                        confidence = transcripts[0].get("confidence", 0)
-                        logger.info(f"[STT] DashScope OK: {text[:80]}")
-                        return {
-                            "text": text,
-                            "success": True,
-                            "error": None,
-                            "confidence": confidence,
-                        }
-                return {"text": "", "success": False, "error": "识别结果为空", "confidence": 0}
-            else:
-                err = getattr(result.output, "message", result.output.task_status)
-                return {"text": "", "success": False, "error": f"DashScope: {err}", "confidence": 0}
+            # call() 接受本地文件路径，同步阻塞直到识别完成
+            result = rec.call(tmp_path)
+
+            # RecognitionResult.output 是 dict，包含 "sentence" 键
+            sentences = result.get_sentence()
+            if sentences:
+                text = ''.join(s.get('text', '') for s in sentences).strip()
+                if text:
+                    logger.info(f"[STT] DashScope OK: {text[:80]}")
+                    return {
+                        "text": text,
+                        "success": True,
+                        "error": None,
+                        "confidence": 0.9,
+                    }
+
+            # 检查是否有错误信息
+            err_msg = getattr(result, 'message', '') or ''
+            if err_msg:
+                return {"text": "", "success": False, "error": f"DashScope: {err_msg}", "confidence": 0}
+
+            return {"text": "", "success": False, "error": "DashScope 识别结果为空", "confidence": 0}
+
         finally:
             os.unlink(tmp_path)
 
+    except ImportError:
+        return {"text": "", "success": False, "error": "dashscope SDK 未安装", "confidence": 0}
     except Exception as e:
         logger.error(f"[STT] DashScope error: {e}")
         return {"text": "", "success": False, "error": str(e), "confidence": 0}
 
 
+def _funasr_transcribe(audio_bytes: bytes) -> dict:
+    """
+    FunASR 本地语音识别（阿里开源，无需 API Key）。
+    作为 DashScope 云端识别失败后的本地 fallback。
+    """
+    try:
+        from funasr import AutoModel
+    except ImportError:
+        return {"text": "", "success": False, "error": "funasr 未安装，请执行 pip install funasr modelscope torch", "confidence": 0}
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            tmp_path = f.name
+
+        model = AutoModel(model="paraformer-zh", model_revision="v2.0.4")
+        result = model.generate(input=tmp_path)
+
+        if result and len(result) > 0:
+            first = result[0]
+            text = ""
+            if isinstance(first, dict):
+                text = first.get("text", "").strip()
+            elif hasattr(first, "text"):
+                text = first.text.strip()
+            else:
+                text = str(first).strip()
+
+            if text:
+                logger.info(f"[STT] FunASR OK: {text[:80]}")
+                return {
+                    "text": text,
+                    "success": True,
+                    "error": None,
+                    "confidence": 0.85,
+                }
+
+        return {"text": "", "success": False, "error": "FunASR 识别结果为空", "confidence": 0}
+
+    except Exception as e:
+        logger.error(f"[STT] FunASR error: {e}")
+        return {"text": "", "success": False, "error": str(e), "confidence": 0}
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 def _google_transcribe(audio_bytes: bytes) -> dict:
-    """Google 免费语音识别。"""
+    """Google 免费语音识别（最后 fallback）。"""
     try:
         import speech_recognition as sr
     except ImportError:
@@ -261,5 +332,5 @@ def _google_transcribe(audio_bytes: bytes) -> dict:
         if tmp_path:
             try:
                 os.unlink(tmp_path)
-            except:
+            except Exception:
                 pass

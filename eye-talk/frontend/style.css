@@ -747,6 +747,27 @@ body {
 
 .stt-confidence.visible { opacity: 1; }
 
+/* Engine tag */
+.stt-engine-tag {
+  font-size: 0.65rem;
+  padding: 1px 8px;
+  border-radius: var(--mi-radius-full);
+  background: var(--mi-card-sub);
+  color: var(--mi-text-muted);
+  white-space: nowrap;
+  transition: all var(--mi-duration);
+}
+
+.stt-engine-tag.backend {
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--mi-success);
+}
+
+.stt-engine-tag.fallback {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--mi-warning);
+}
+
 /* Volume meter */
 .stt-meter-wrap {
   height: 4px;
@@ -1050,9 +1071,10 @@ body {
 }
 
 .modal-content select,
-.modal-content input[type="password"] {
+.modal-content input.api-key-input {
   width: 100%;
   padding: 10px 14px;
+  padding-right: 40px;
   border-radius: var(--mi-radius-sm);
   border: 1px solid var(--mi-border);
   background: var(--mi-card-sub);
@@ -1065,8 +1087,12 @@ body {
   appearance: none;
 }
 
+.modal-content input.api-key-input[type="password"] {
+  letter-spacing: 2px;
+}
+
 .modal-content select:focus,
-.modal-content input[type="password"]:focus {
+.modal-content input.api-key-input:focus {
   border-color: var(--mi-accent);
   box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
 }

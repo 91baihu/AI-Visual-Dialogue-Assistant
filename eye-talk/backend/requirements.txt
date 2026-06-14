@@ -8,5 +8,8 @@ httpx
 edge-tts
 SpeechRecognition
 pyaudio
-dashscope
+dashscope>=1.20.0
 pydub
+funasr
+modelscope
+torch
