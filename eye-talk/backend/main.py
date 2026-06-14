@@ -360,6 +360,12 @@ async def websocket_endpoint(websocket: WebSocket):
             msg_type = data.get("type", "chat")
             text = data.get("text", "")
             image = data.get("image", "")
+
+            # 心跳 pong — 保持连接活跃
+            if msg_type == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+                continue
+
             if msg_type == "chat":
                 has_image = bool(image)
                 logger.info(f"[WS:{conn_id}] type=chat text={text!r} image={'yes' if has_image else 'no'}")
@@ -371,7 +377,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         try:
                             reply = await asyncio.wait_for(
                                 loop.run_in_executor(None, ai_service.chat_with_image, text, image),
-                                timeout=20,
+                                timeout=60,
                             )
                         except asyncio.TimeoutError:
                             elapsed = time.time() - start
@@ -384,7 +390,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         reply = await asyncio.wait_for(
                             loop.run_in_executor(None, ai_service.chat, text),
-                            timeout=30,
+                            timeout=60,
                         )
 
                     elapsed = time.time() - start
