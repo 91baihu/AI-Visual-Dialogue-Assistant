@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import asyncio
 import logging
 from dotenv import load_dotenv, set_key
 from pathlib import Path
@@ -43,6 +44,7 @@ ai_service = ChatService()
 
 # Track connected WebSocket clients for broadcast
 _ws_clients: dict[int, WebSocket] = {}
+_ws_session_stats: dict[int, dict] = {}  # per-connection token tracking
 
 
 async def _test_api_key(provider: str, api_key: str) -> dict:
@@ -103,37 +105,15 @@ _global_stats = {
 }
 
 
-def merge_stats(token_usage):
-    """Merge a ChatService's token usage into global stats.
-
-    Computes delta from the service's own accumulators so cost is always
-    calculated at the *current* provider's rate for each batch of tokens.
-    After a provider switch the new service starts at zero, so the delta
-    correctly reflects only new usage.
-    """
-    d = token_usage.to_dict()
+def add_stats(prompt_tokens: int, completion_tokens: int, input_price: float, output_price: float):
+    """直接累加全局统计，无 delta 机制。"""
     with _global_stats_lock:
-        delta_calls = d["total_calls"] - _global_stats.get("_last_calls", 0)
-        delta_prompt = d["prompt_tokens"] - _global_stats.get("_last_prompt", 0)
-        delta_completion = d["completion_tokens"] - _global_stats.get("_last_completion", 0)
-
-        _global_stats["total_calls"] += delta_calls
-        _global_stats["prompt_tokens"] += delta_prompt
-        _global_stats["completion_tokens"] += delta_completion
+        _global_stats["total_calls"] += 1
+        _global_stats["prompt_tokens"] += prompt_tokens
+        _global_stats["completion_tokens"] += completion_tokens
         _global_stats["total_tokens"] = _global_stats["prompt_tokens"] + _global_stats["completion_tokens"]
-
-        # Accumulate cost as delta — each batch is priced at its provider's rate
-        delta_cost = (
-            delta_prompt / 1_000_000 * token_usage.input_price +
-            delta_completion / 1_000_000 * token_usage.output_price
-        )
-        _global_stats["estimated_cost"] = round(
-            _global_stats.get("estimated_cost", 0.0) + delta_cost, 6
-        )
-
-        _global_stats["_last_calls"] = d["total_calls"]
-        _global_stats["_last_prompt"] = d["prompt_tokens"]
-        _global_stats["_last_completion"] = d["completion_tokens"]
+        cost = prompt_tokens / 1_000_000 * input_price + completion_tokens / 1_000_000 * output_price
+        _global_stats["estimated_cost"] = round(_global_stats["estimated_cost"] + cost, 6)
 
 
 @app.get("/")
@@ -235,7 +215,7 @@ async def stt_websocket(websocket: WebSocket):
                         logger.info(f"[STT-WS:{conn_id}] session ended by client")
 
                     elif msg_type == "cancel":
-                        transcriber._reset()
+                        transcriber.cancel()
                         logger.info(f"[STT-WS:{conn_id}] cancelled")
 
     except WebSocketDisconnect:
@@ -325,10 +305,8 @@ async def update_config(config: ConfigUpdate):
             "completion_tokens": 0,
             "total_tokens": 0,
             "estimated_cost": 0.0,
-            "_last_calls": 0,
-            "_last_prompt": 0,
-            "_last_completion": 0,
         })
+    _ws_session_stats.clear()
 
     # 5. Notify all connected WebSocket clients
     broadcast_msg = json.dumps({
@@ -387,22 +365,52 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"[WS:{conn_id}] type=chat text={text!r} image={'yes' if has_image else 'no'}")
 
                 start = time.time()
+                loop = asyncio.get_event_loop()
                 try:
                     if has_image:
-                        reply = ai_service.chat_with_image(text, image)
+                        try:
+                            reply = await asyncio.wait_for(
+                                loop.run_in_executor(None, ai_service.chat_with_image, text, image),
+                                timeout=20,
+                            )
+                        except asyncio.TimeoutError:
+                            elapsed = time.time() - start
+                            logger.error(f"[WS:{conn_id}] Vision API timeout after {elapsed:.2f}s")
+                            await websocket.send_text(json.dumps({
+                                "type": "reply",
+                                "text": "AI 视觉识别响应较慢，请稍后重试或切换更快的模型",
+                            }))
+                            continue
                     else:
-                        reply = ai_service.chat(text)
+                        reply = await asyncio.wait_for(
+                            loop.run_in_executor(None, ai_service.chat, text),
+                            timeout=30,
+                        )
 
                     elapsed = time.time() - start
                     logger.info(f"[WS:{conn_id}] AI replied in {elapsed:.2f}s, {len(reply)} chars")
 
-                    # Update global stats
-                    merge_stats(ai_service.tokens)
+                    # Update global stats — 直接从 ai_service.tokens 取本次累计值
+                    t = ai_service.tokens
+                    # 本次调用的 token = 当前累计 - 上次已统计的
+                    prompt_delta = t.prompt_tokens - _ws_session_stats.get(conn_id, {}).get("prompt", 0)
+                    comp_delta = t.completion_tokens - _ws_session_stats.get(conn_id, {}).get("comp", 0)
+                    calls_delta = t.total_calls - _ws_session_stats.get(conn_id, {}).get("calls", 0)
+                    if calls_delta > 0:
+                        add_stats(prompt_delta, comp_delta, t.input_price, t.output_price)
+                        _ws_session_stats[conn_id] = {
+                            "prompt": t.prompt_tokens,
+                            "comp": t.completion_tokens,
+                            "calls": t.total_calls,
+                        }
+
+                    with _global_stats_lock:
+                        usage_data = dict(_global_stats)
 
                     await websocket.send_text(json.dumps({
                         "type": "reply",
                         "text": reply,
-                        "usage": ai_service.tokens.to_dict(),
+                        "usage": usage_data,
                     }))
 
                 except Exception as e:
@@ -438,7 +446,7 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"[WS:{conn_id}] unexpected error: {e}")
     finally:
         _ws_clients.pop(conn_id, None)
-        merge_stats(ai_service.tokens)
+        _ws_session_stats.pop(conn_id, None)
         logger.info(f"[WS:{conn_id}] cleaned up ({len(_ws_clients)} remaining)")
 
 
